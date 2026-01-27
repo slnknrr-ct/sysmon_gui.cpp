@@ -1,0 +1,894 @@
+#include "agentcore.h"
+#include "ipcserver.h"
+#include "systemmonitor.h"
+#include "devicemanager.h"
+#include "networkmanager.h"
+#include "processmanager.h"
+#include "androidmanager.h"
+#include "automationengine.h"
+#include "logger.h"
+#include "configmanager.h"
+#include "../shared/ipcprotocol.h"
+#include "../shared/commands.h"
+#include "../shared/systemtypes.h"
+#include <iostream>
+#include <chrono>
+#include <thread>
+#include <mutex>
+#include <sstream>
+#include <iomanip>
+
+namespace SysMon {
+
+AgentCore::AgentCore() 
+    : running_(false)
+    , initialized_(false) {
+}
+
+AgentCore::~AgentCore() {
+    shutdown();
+}
+
+bool AgentCore::initialize() {
+    if (initialized_) {
+        return true;
+    }
+    
+    std::cout << "Initializing Agent Core..." << std::endl;
+    
+    // Initialize logger first
+    logger_ = std::make_unique<Logger>();
+    if (!logger_->initialize("sysmon_agent.log", LogLevel::INFO)) {
+        std::cerr << "Failed to initialize logger" << std::endl;
+        return false;
+    }
+    if (!initializeComponents()) {
+        logger_->error("Failed to initialize components");
+        return false;
+    }
+    
+    initialized_ = true;
+    logger_->info("Agent Core initialized successfully");
+    return true;
+}
+
+bool AgentCore::start() {
+    if (!initialized_) {
+        logger_->error("Agent Core not initialized");
+        return false;
+    }
+    
+    if (running_) {
+        logger_->warning("Agent Core already running");
+        return true;
+    }
+    
+    logger_->info("Starting Agent Core...");
+    
+    // Start IPC server
+    if (!ipcServer_->start()) {
+        logger_->error("Failed to start IPC server");
+        return false;
+    }
+    
+    // Start monitoring components
+    if (!systemMonitor_->start()) {
+        logger_->error("Failed to start system monitor");
+        return false;
+    }
+    
+    if (!deviceManager_->start()) {
+        logger_->error("Failed to start device manager");
+        return false;
+    }
+    
+    if (!networkManager_->start()) {
+        logger_->error("Failed to start network manager");
+        return false;
+    }
+    
+    if (!processManager_->start()) {
+        logger_->error("Failed to start process manager");
+        return false;
+    }
+    
+    if (!androidManager_->start()) {
+        logger_->error("Failed to start android manager");
+        return false;
+    }
+    
+    if (!automationEngine_->start()) {
+        logger_->error("Failed to start automation engine");
+        return false;
+    }
+    
+    // Start worker thread
+    running_ = true;
+    workerThread_ = std::thread(&AgentCore::workerThread, this);
+    
+    logger_->info("Agent Core started successfully");
+    return true;
+}
+
+void AgentCore::stop() {
+    if (!running_) {
+        return;
+    }
+    
+    logger_->info("Stopping Agent Core...");
+    running_ = false;
+    
+    // Stop components
+    if (automationEngine_) automationEngine_->stop();
+    if (androidManager_) androidManager_->stop();
+    if (processManager_) processManager_->stop();
+    if (networkManager_) networkManager_->stop();
+    if (deviceManager_) deviceManager_->stop();
+    if (systemMonitor_) systemMonitor_->stop();
+    if (ipcServer_) ipcServer_->stop();
+    
+    // Wait for worker thread
+    if (workerThread_.joinable()) {
+        workerThread_.join();
+    }
+    
+    logger_->info("Agent Core stopped");
+}
+
+void AgentCore::shutdown() {
+    stop();
+    cleanupComponents();
+    initialized_ = false;
+}
+
+bool AgentCore::isRunning() const {
+    return running_;
+}
+
+std::string AgentCore::getStatus() const {
+    if (running_) {
+        return "Running";
+    } else if (initialized_) {
+        return "Stopped";
+    } else {
+        return "Not initialized";
+    }
+}
+
+bool AgentCore::initializeComponents() {
+    logger_->info("Initializing components...");
+    
+    // Initialize configuration manager first
+    configManager_ = std::make_unique<ConfigManager>();
+    if (!configManager_->initialize("sysmon_agent.conf")) {
+        logger_->warning("Failed to load configuration, using defaults");
+    }
+    
+    // Initialize IPC server
+    ipcServer_ = std::make_unique<IpcServer>();
+    if (!ipcServer_->initialize()) {
+        logger_->error("Failed to initialize IPC server");
+        return false;
+    }
+    
+    // Initialize system monitor
+    systemMonitor_ = std::make_unique<SystemMonitor>();
+    if (!systemMonitor_->initialize()) {
+        logger_->error("Failed to initialize system monitor");
+        return false;
+    }
+    
+    // Initialize device manager
+    deviceManager_ = std::make_unique<DeviceManager>();
+    if (!deviceManager_->initialize()) {
+        logger_->error("Failed to initialize device manager");
+        return false;
+    }
+    
+    // Initialize network manager
+    networkManager_ = std::make_unique<NetworkManager>();
+    if (!networkManager_->initialize()) {
+        logger_->error("Failed to initialize network manager");
+        return false;
+    }
+    
+    // Initialize process manager
+    processManager_ = std::make_unique<ProcessManager>();
+    if (!processManager_->initialize()) {
+        logger_->error("Failed to initialize process manager");
+        return false;
+    }
+    
+    // Initialize android manager
+    androidManager_ = std::make_unique<AndroidManager>();
+    if (!androidManager_->initialize()) {
+        logger_->error("Failed to initialize android manager");
+        return false;
+    }
+    
+    // Initialize automation engine
+    automationEngine_ = std::make_unique<AutomationEngine>();
+    if (!automationEngine_->initialize(this)) {
+        logger_->error("Failed to initialize automation engine");
+        return false;
+    }
+    
+    // Set up command handler
+    ipcServer_->setCommandHandler([this](const Command& cmd) {
+        return handleCommand(cmd);
+    });
+    
+    // Set up logger
+    ipcServer_->setLogger(logger_.get());
+    
+    logger_->info("All components initialized successfully");
+    return true;
+}
+
+void AgentCore::cleanupComponents() {
+    logger_->info("Cleaning up components...");
+    
+    // Cleanup in reverse order
+    if (automationEngine_) {
+        automationEngine_->shutdown();
+        automationEngine_.reset();
+    }
+    
+    if (androidManager_) {
+        androidManager_->shutdown();
+        androidManager_.reset();
+    }
+    
+    if (processManager_) {
+        processManager_->shutdown();
+        processManager_.reset();
+    }
+    
+    if (networkManager_) {
+        networkManager_->shutdown();
+        networkManager_.reset();
+    }
+    
+    if (deviceManager_) {
+        deviceManager_->shutdown();
+        deviceManager_.reset();
+    }
+    
+    if (systemMonitor_) {
+        systemMonitor_->shutdown();
+        systemMonitor_.reset();
+    }
+    
+    if (ipcServer_) {
+        ipcServer_->shutdown();
+        ipcServer_.reset();
+    }
+    
+    if (configManager_) {
+        configManager_.reset();
+    }
+    
+    if (logger_) {
+        logger_->shutdown();
+        logger_.reset();
+    }
+    
+    logger_->info("Components cleanup complete");
+}
+
+void AgentCore::workerThread() {
+    logger_->info("Worker thread started");
+    
+    while (running_) {
+        try {
+            // Process any pending commands or events
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        } catch (const std::exception& e) {
+            logger_->error("Exception in worker thread: " + std::string(e.what()));
+        }
+    }
+    
+    logger_->info("Worker thread stopped");
+}
+
+Response AgentCore::handleCommand(const Command& command) {
+    logger_->info("Handling command: " + commandTypeToString(command.type));
+    
+    try {
+        switch (command.module) {
+            case Module::SYSTEM:
+                return handleSystemCommand(command);
+            case Module::DEVICE:
+                return handleDeviceCommand(command);
+            case Module::NETWORK:
+                return handleNetworkCommand(command);
+            case Module::PROCESS:
+                return handleProcessCommand(command);
+            case Module::ANDROID:
+                return handleAndroidCommand(command);
+            case Module::AUTOMATION:
+                return handleAutomationCommand(command);
+            default:
+                return handleGenericCommand(command);
+        }
+    } catch (const std::exception& e) {
+        logger_->error("Exception handling command: " + std::string(e.what()));
+        return createResponse(command.id, CommandStatus::FAILED, e.what());
+    }
+}
+
+Response AgentCore::handleSystemCommand(const Command& command) {
+    try {
+        switch (command.type) {
+            case CommandType::GET_SYSTEM_INFO: {
+                if (!systemMonitor_) {
+                    return createResponse(command.id, CommandStatus::FAILED, "System monitor not available");
+                }
+                
+                auto info = systemMonitor_->getCurrentSystemInfo();
+                std::map<std::string, std::string> data;
+                
+                // Serialize system info
+                data["cpu_total"] = std::to_string(info.cpuUsageTotal);
+                data["memory_total"] = std::to_string(info.memoryTotal);
+                data["memory_used"] = std::to_string(info.memoryUsed);
+                data["memory_free"] = std::to_string(info.memoryFree);
+                data["process_count"] = std::to_string(info.processCount);
+                data["thread_count"] = std::to_string(info.threadCount);
+                data["uptime"] = std::to_string(info.uptime.count());
+                
+                // CPU cores usage
+                for (size_t i = 0; i < info.cpuCoresUsage.size(); ++i) {
+                    data["cpu_core_" + std::to_string(i)] = std::to_string(info.cpuCoresUsage[i]);
+                }
+                
+                return createResponse(command.id, CommandStatus::SUCCESS, "System info retrieved", data);
+            }
+            
+            case CommandType::GET_PROCESS_LIST: {
+                if (!processManager_) {
+                    return createResponse(command.id, CommandStatus::FAILED, "Process manager not available");
+                }
+                
+                auto processes = processManager_->getProcessList();
+                std::map<std::string, std::string> data;
+                
+                // Serialize process list
+                data["process_count"] = std::to_string(processes.size());
+                
+                for (size_t i = 0; i < processes.size() && i < 100; ++i) { // Limit to 100 processes
+                    const auto& proc = processes[i];
+                    std::string prefix = "proc_" + std::to_string(i) + "_";
+                    data[prefix + "pid"] = std::to_string(proc.pid);
+                    data[prefix + "name"] = proc.name;
+                    data[prefix + "cpu"] = std::to_string(proc.cpuUsage);
+                    data[prefix + "memory"] = std::to_string(proc.memoryUsage);
+                    data[prefix + "status"] = proc.status;
+                    data[prefix + "parent_pid"] = std::to_string(proc.parentPid);
+                    data[prefix + "user"] = proc.user;
+                }
+                
+                return createResponse(command.id, CommandStatus::SUCCESS, "Process list retrieved", data);
+            }
+            
+            default:
+                return createResponse(command.id, CommandStatus::FAILED, "Unknown system command");
+        }
+    } catch (const std::exception& e) {
+        logger_->error("Exception in handleSystemCommand: " + std::string(e.what()));
+        return createResponse(command.id, CommandStatus::FAILED, e.what());
+    }
+}
+
+Response AgentCore::handleDeviceCommand(const Command& command) {
+    try {
+        if (!deviceManager_) {
+            return createResponse(command.id, CommandStatus::FAILED, "Device manager not available");
+        }
+        
+        switch (command.type) {
+            case CommandType::GET_USB_DEVICES: {
+                auto devices = deviceManager_->getUsbDevices();
+                std::map<std::string, std::string> data;
+                
+                data["device_count"] = std::to_string(devices.size());
+                
+                for (size_t i = 0; i < devices.size(); ++i) {
+                    const auto& device = devices[i];
+                    std::string prefix = "usb_" + std::to_string(i) + "_";
+                    data[prefix + "vid"] = device.vid;
+                    data[prefix + "pid"] = device.pid;
+                    data[prefix + "name"] = device.name;
+                    data[prefix + "serial"] = device.serialNumber;
+                    data[prefix + "connected"] = device.isConnected ? "1" : "0";
+                    data[prefix + "enabled"] = device.isEnabled ? "1" : "0";
+                }
+                
+                return createResponse(command.id, CommandStatus::SUCCESS, "USB devices retrieved", data);
+            }
+            
+            case CommandType::ENABLE_USB_DEVICE:
+            case CommandType::DISABLE_USB_DEVICE: {
+                auto it = command.parameters.find("device_id");
+                if (it == command.parameters.end()) {
+                    return createResponse(command.id, CommandStatus::FAILED, "Missing device_id parameter");
+                }
+                
+                std::string deviceId = it->second;
+                bool enable = (command.type == CommandType::ENABLE_USB_DEVICE);
+                
+                // Parse deviceId which should be in format "vid,pid"
+                size_t commaPos = deviceId.find(',');
+                if (commaPos == std::string::npos) {
+                    return createResponse(command.id, CommandStatus::FAILED, "Invalid device_id format, expected vid,pid");
+                }
+                
+                std::string vid = deviceId.substr(0, commaPos);
+                std::string pid = deviceId.substr(commaPos + 1);
+                
+                bool success = enable ? 
+                    deviceManager_->enableUsbDevice(vid, pid) : 
+                    deviceManager_->disableUsbDevice(vid, pid);
+                
+                if (success) {
+                    std::string action = enable ? "enabled" : "disabled";
+                    return createResponse(command.id, CommandStatus::SUCCESS, 
+                        "Device " + action + " successfully");
+                } else {
+                    return createResponse(command.id, CommandStatus::FAILED, 
+                        "Failed to " + std::string(enable ? "enable" : "disable") + " device");
+                }
+            }
+            
+            default:
+                return createResponse(command.id, CommandStatus::FAILED, "Unknown device command");
+        }
+    } catch (const std::exception& e) {
+        logger_->error("Exception in handleDeviceCommand: " + std::string(e.what()));
+        return createResponse(command.id, CommandStatus::FAILED, e.what());
+    }
+}
+
+Response AgentCore::handleNetworkCommand(const Command& command) {
+    try {
+        if (!networkManager_) {
+            return createResponse(command.id, CommandStatus::FAILED, "Network manager not available");
+        }
+        
+        switch (command.type) {
+            case CommandType::GET_NETWORK_INTERFACES: {
+                auto interfaces = networkManager_->getNetworkInterfaces();
+                std::map<std::string, std::string> data;
+                
+                data["interface_count"] = std::to_string(interfaces.size());
+                
+                for (size_t i = 0; i < interfaces.size(); ++i) {
+                    const auto& iface = interfaces[i];
+                    std::string prefix = "iface_" + std::to_string(i) + "_";
+                    data[prefix + "name"] = iface.name;
+                    data[prefix + "ipv4"] = iface.ipv4;
+                    data[prefix + "ipv6"] = iface.ipv6;
+                    data[prefix + "enabled"] = iface.isEnabled ? "1" : "0";
+                    data[prefix + "rx_bytes"] = std::to_string(iface.rxBytes);
+                    data[prefix + "tx_bytes"] = std::to_string(iface.txBytes);
+                    data[prefix + "rx_speed"] = std::to_string(iface.rxSpeed);
+                    data[prefix + "tx_speed"] = std::to_string(iface.txSpeed);
+                }
+                
+                return createResponse(command.id, CommandStatus::SUCCESS, "Network interfaces retrieved", data);
+            }
+            
+            case CommandType::ENABLE_NETWORK_INTERFACE:
+            case CommandType::DISABLE_NETWORK_INTERFACE: {
+                auto it = command.parameters.find("interface_name");
+                if (it == command.parameters.end()) {
+                    return createResponse(command.id, CommandStatus::FAILED, "Missing interface_name parameter");
+                }
+                
+                std::string interfaceName = it->second;
+                bool enable = (command.type == CommandType::ENABLE_NETWORK_INTERFACE);
+                
+                bool success = enable ? 
+                    networkManager_->enableInterface(interfaceName) : 
+                    networkManager_->disableInterface(interfaceName);
+                
+                if (success) {
+                    std::string action = enable ? "enabled" : "disabled";
+                    return createResponse(command.id, CommandStatus::SUCCESS, 
+                        "Interface " + action + " successfully");
+                } else {
+                    return createResponse(command.id, CommandStatus::FAILED, 
+                        "Failed to " + std::string(enable ? "enable" : "disable") + " interface");
+                }
+            }
+            
+            case CommandType::SET_STATIC_IP: {
+                auto nameIt = command.parameters.find("interface_name");
+                auto ipIt = command.parameters.find("ip");
+                auto maskIt = command.parameters.find("netmask");
+                auto gwIt = command.parameters.find("gateway");
+                
+                if (nameIt == command.parameters.end() || ipIt == command.parameters.end() || 
+                    maskIt == command.parameters.end() || gwIt == command.parameters.end()) {
+                    return createResponse(command.id, CommandStatus::FAILED, 
+                        "Missing required parameters: interface_name, ip, netmask, gateway");
+                }
+                
+                bool success = networkManager_->setStaticIp(
+                    nameIt->second, ipIt->second, maskIt->second, gwIt->second);
+                
+                return success ? 
+                    createResponse(command.id, CommandStatus::SUCCESS, "Static IP configured successfully") :
+                    createResponse(command.id, CommandStatus::FAILED, "Failed to configure static IP");
+            }
+            
+            case CommandType::SET_DHCP_IP: {
+                auto it = command.parameters.find("interface_name");
+                if (it == command.parameters.end()) {
+                    return createResponse(command.id, CommandStatus::FAILED, "Missing interface_name parameter");
+                }
+                
+                bool success = networkManager_->setDhcpIp(it->second);
+                
+                return success ? 
+                    createResponse(command.id, CommandStatus::SUCCESS, "DHCP configured successfully") :
+                    createResponse(command.id, CommandStatus::FAILED, "Failed to configure DHCP");
+            }
+            
+            default:
+                return createResponse(command.id, CommandStatus::FAILED, "Unknown network command");
+        }
+    } catch (const std::exception& e) {
+        logger_->error("Exception in handleNetworkCommand: " + std::string(e.what()));
+        return createResponse(command.id, CommandStatus::FAILED, e.what());
+    }
+}
+
+Response AgentCore::handleProcessCommand(const Command& command) {
+    try {
+        if (!processManager_) {
+            return createResponse(command.id, CommandStatus::FAILED, "Process manager not available");
+        }
+        
+        switch (command.type) {
+            case CommandType::TERMINATE_PROCESS:
+            case CommandType::KILL_PROCESS: {
+                auto it = command.parameters.find("pid");
+                if (it == command.parameters.end()) {
+                    return createResponse(command.id, CommandStatus::FAILED, "Missing pid parameter");
+                }
+                
+                try {
+                    uint32_t pid = std::stoul(it->second);
+                    bool forceKill = (command.type == CommandType::KILL_PROCESS);
+                    
+                    // Check if process is critical
+                    if (processManager_->isCriticalProcess(pid)) {
+                        return createResponse(command.id, CommandStatus::FAILED, 
+                            "Cannot terminate critical process");
+                    }
+                    
+                    bool success = forceKill ? 
+                        processManager_->killProcess(pid) : 
+                        processManager_->terminateProcess(pid);
+                    
+                    if (success) {
+                        std::string action = forceKill ? "killed" : "terminated";
+                        return createResponse(command.id, CommandStatus::SUCCESS, 
+                            "Process " + action + " successfully");
+                    } else {
+                        return createResponse(command.id, CommandStatus::FAILED, 
+                            "Failed to " + std::string(forceKill ? "kill" : "terminate") + " process");
+                    }
+                } catch (const std::exception& e) {
+                    return createResponse(command.id, CommandStatus::FAILED, "Invalid PID format");
+                }
+            }
+            
+            default:
+                return createResponse(command.id, CommandStatus::FAILED, "Unknown process command");
+        }
+    } catch (const std::exception& e) {
+        logger_->error("Exception in handleProcessCommand: " + std::string(e.what()));
+        return createResponse(command.id, CommandStatus::FAILED, e.what());
+    }
+}
+
+Response AgentCore::handleAndroidCommand(const Command& command) {
+    try {
+        if (!androidManager_) {
+            return createResponse(command.id, CommandStatus::FAILED, "Android manager not available");
+        }
+        
+        switch (command.type) {
+            case CommandType::GET_ANDROID_DEVICES: {
+                auto devices = androidManager_->getConnectedDevices();
+                std::map<std::string, std::string> data;
+                
+                data["device_count"] = std::to_string(devices.size());
+                
+                for (size_t i = 0; i < devices.size(); ++i) {
+                    const auto& device = devices[i];
+                    std::string prefix = "android_" + std::to_string(i) + "_";
+                    data[prefix + "model"] = device.model;
+                    data[prefix + "version"] = device.androidVersion;
+                    data[prefix + "serial"] = device.serialNumber;
+                    data[prefix + "battery"] = std::to_string(device.batteryLevel);
+                    data[prefix + "screen_on"] = device.isScreenOn ? "1" : "0";
+                    data[prefix + "locked"] = device.isLocked ? "1" : "0";
+                    data[prefix + "foreground_app"] = device.foregroundApp;
+                }
+                
+                return createResponse(command.id, CommandStatus::SUCCESS, "Android devices retrieved", data);
+            }
+            
+            case CommandType::ANDROID_SCREEN_ON:
+            case CommandType::ANDROID_SCREEN_OFF: {
+                auto it = command.parameters.find("device_serial");
+                if (it == command.parameters.end()) {
+                    return createResponse(command.id, CommandStatus::FAILED, "Missing device_serial parameter");
+                }
+                
+                std::string deviceSerial = it->second;
+                bool turnOn = (command.type == CommandType::ANDROID_SCREEN_ON);
+                
+                bool success = turnOn ? 
+                    androidManager_->turnScreenOn(deviceSerial) : 
+                    androidManager_->turnScreenOff(deviceSerial);
+                
+                if (success) {
+                    std::string action = turnOn ? "turned on" : "turned off";
+                    return createResponse(command.id, CommandStatus::SUCCESS, 
+                        "Screen " + action + " successfully");
+                } else {
+                    return createResponse(command.id, CommandStatus::FAILED, 
+                        "Failed to " + std::string(turnOn ? "turn on" : "turn off") + " screen");
+                }
+            }
+            
+            case CommandType::ANDROID_LOCK_DEVICE: {
+                auto it = command.parameters.find("device_serial");
+                if (it == command.parameters.end()) {
+                    return createResponse(command.id, CommandStatus::FAILED, "Missing device_serial parameter");
+                }
+                
+                bool success = androidManager_->lockDevice(it->second);
+                
+                return success ? 
+                    createResponse(command.id, CommandStatus::SUCCESS, "Device locked successfully") :
+                    createResponse(command.id, CommandStatus::FAILED, "Failed to lock device");
+            }
+            
+            case CommandType::ANDROID_GET_FOREGROUND_APP: {
+                auto it = command.parameters.find("device_serial");
+                if (it == command.parameters.end()) {
+                    return createResponse(command.id, CommandStatus::FAILED, "Missing device_serial parameter");
+                }
+                
+                std::string app = androidManager_->getForegroundApp(it->second);
+                std::map<std::string, std::string> data;
+                data["foreground_app"] = app;
+                
+                return createResponse(command.id, CommandStatus::SUCCESS, 
+                    "Foreground app retrieved", data);
+            }
+            
+            case CommandType::ANDROID_LAUNCH_APP:
+            case CommandType::ANDROID_STOP_APP: {
+                auto deviceIt = command.parameters.find("device_serial");
+                auto appIt = command.parameters.find("package_name");
+                
+                if (deviceIt == command.parameters.end() || appIt == command.parameters.end()) {
+                    return createResponse(command.id, CommandStatus::FAILED, 
+                        "Missing device_serial or package_name parameter");
+                }
+                
+                bool launch = (command.type == CommandType::ANDROID_LAUNCH_APP);
+                bool success = launch ? 
+                    androidManager_->launchApp(deviceIt->second, appIt->second) :
+                    androidManager_->stopApp(deviceIt->second, appIt->second);
+                
+                if (success) {
+                    std::string action = launch ? "launched" : "stopped";
+                    return createResponse(command.id, CommandStatus::SUCCESS, 
+                        "App " + action + " successfully");
+                } else {
+                    return createResponse(command.id, CommandStatus::FAILED, 
+                        "Failed to " + std::string(launch ? "launch" : "stop") + " app");
+                }
+            }
+            
+            case CommandType::ANDROID_TAKE_SCREENSHOT: {
+                auto it = command.parameters.find("device_serial");
+                if (it == command.parameters.end()) {
+                    return createResponse(command.id, CommandStatus::FAILED, "Missing device_serial parameter");
+                }
+                
+                std::string screenshotPath = androidManager_->takeScreenshot(it->second);
+                std::map<std::string, std::string> data;
+                data["screenshot_path"] = screenshotPath;
+                
+                return createResponse(command.id, CommandStatus::SUCCESS, 
+                    "Screenshot taken", data);
+            }
+            
+            case CommandType::ANDROID_GET_ORIENTATION: {
+                auto it = command.parameters.find("device_serial");
+                if (it == command.parameters.end()) {
+                    return createResponse(command.id, CommandStatus::FAILED, "Missing device_serial parameter");
+                }
+                
+                std::string orientation = androidManager_->getScreenOrientation(it->second);
+                std::map<std::string, std::string> data;
+                data["orientation"] = orientation;
+                
+                return createResponse(command.id, CommandStatus::SUCCESS, 
+                    "Orientation retrieved", data);
+            }
+            
+            case CommandType::ANDROID_GET_LOGCAT: {
+                auto it = command.parameters.find("device_serial");
+                if (it == command.parameters.end()) {
+                    return createResponse(command.id, CommandStatus::FAILED, "Missing device_serial parameter");
+                }
+                
+                auto logLines = androidManager_->getLogcat(it->second);
+                std::string logs;
+                for (const auto& line : logLines) {
+                    logs += line + "\n";
+                }
+                std::map<std::string, std::string> data;
+                data["logs"] = logs;
+                
+                return createResponse(command.id, CommandStatus::SUCCESS, 
+                    "Logcat retrieved", data);
+            }
+            
+            default:
+                return createResponse(command.id, CommandStatus::FAILED, "Unknown android command");
+        }
+    } catch (const std::exception& e) {
+        logger_->error("Exception in handleAndroidCommand: " + std::string(e.what()));
+        return createResponse(command.id, CommandStatus::FAILED, e.what());
+    }
+}
+
+Response AgentCore::handleAutomationCommand(const Command& command) {
+    try {
+        if (!automationEngine_) {
+            return createResponse(command.id, CommandStatus::FAILED, "Automation engine not available");
+        }
+        
+        switch (command.type) {
+            case CommandType::GET_AUTOMATION_RULES: {
+                auto rules = automationEngine_->getRules();
+                std::map<std::string, std::string> data;
+                
+                data["rule_count"] = std::to_string(rules.size());
+                
+                for (size_t i = 0; i < rules.size(); ++i) {
+                    const auto& rule = rules[i];
+                    std::string prefix = "rule_" + std::to_string(i) + "_";
+                    data[prefix + "id"] = rule.id;
+                    data[prefix + "condition"] = rule.condition;
+                    data[prefix + "action"] = rule.action;
+                    data[prefix + "enabled"] = rule.isEnabled ? "1" : "0";
+                    data[prefix + "duration"] = std::to_string(rule.duration.count());
+                }
+                
+                return createResponse(command.id, CommandStatus::SUCCESS, "Automation rules retrieved", data);
+            }
+            
+            case CommandType::ADD_AUTOMATION_RULE: {
+                auto conditionIt = command.parameters.find("condition");
+                auto actionIt = command.parameters.find("action");
+                
+                if (conditionIt == command.parameters.end() || actionIt == command.parameters.end()) {
+                    return createResponse(command.id, CommandStatus::FAILED, 
+                        "Missing condition or action parameter");
+                }
+                
+                AutomationRule rule;
+                rule.id = std::to_string(std::chrono::system_clock::now().time_since_epoch().count());
+                rule.condition = conditionIt->second;
+                rule.action = actionIt->second;
+                rule.isEnabled = true;
+                
+                auto durationIt = command.parameters.find("duration");
+                if (durationIt != command.parameters.end()) {
+                    try {
+                        rule.duration = std::chrono::seconds(std::stoul(durationIt->second));
+                    } catch (...) {
+                        rule.duration = std::chrono::seconds(0);
+                    }
+                }
+                
+                bool success = automationEngine_->addRule(rule);
+                
+                return success ? 
+                    createResponse(command.id, CommandStatus::SUCCESS, 
+                        "Automation rule added with ID: " + rule.id) :
+                    createResponse(command.id, CommandStatus::FAILED, "Failed to add automation rule");
+            }
+            
+            case CommandType::REMOVE_AUTOMATION_RULE: {
+                auto it = command.parameters.find("rule_id");
+                if (it == command.parameters.end()) {
+                    return createResponse(command.id, CommandStatus::FAILED, "Missing rule_id parameter");
+                }
+                
+                bool success = automationEngine_->removeRule(it->second);
+                
+                return success ? 
+                    createResponse(command.id, CommandStatus::SUCCESS, "Automation rule removed") :
+                    createResponse(command.id, CommandStatus::FAILED, "Failed to remove automation rule");
+            }
+            
+            case CommandType::ENABLE_AUTOMATION_RULE:
+            case CommandType::DISABLE_AUTOMATION_RULE: {
+                auto it = command.parameters.find("rule_id");
+                if (it == command.parameters.end()) {
+                    return createResponse(command.id, CommandStatus::FAILED, "Missing rule_id parameter");
+                }
+                
+                bool enable = (command.type == CommandType::ENABLE_AUTOMATION_RULE);
+                bool success = enable ? 
+                    automationEngine_->enableRule(it->second) : 
+                    automationEngine_->disableRule(it->second);
+                
+                if (success) {
+                    std::string action = enable ? "enabled" : "disabled";
+                    return createResponse(command.id, CommandStatus::SUCCESS, 
+                        "Automation rule " + action);
+                } else {
+                    return createResponse(command.id, CommandStatus::FAILED, 
+                        "Failed to " + std::string(enable ? "enable" : "disable") + " automation rule");
+                }
+            }
+            
+            default:
+                return createResponse(command.id, CommandStatus::FAILED, "Unknown automation command");
+        }
+    } catch (const std::exception& e) {
+        logger_->error("Exception in handleAutomationCommand: " + std::string(e.what()));
+        return createResponse(command.id, CommandStatus::FAILED, e.what());
+    }
+}
+
+Response AgentCore::handleGenericCommand(const Command& command) {
+    switch (command.type) {
+        case CommandType::PING:
+            return createResponse(command.id, CommandStatus::SUCCESS, "PONG");
+        case CommandType::SHUTDOWN:
+            logger_->info("Shutdown command received");
+            running_ = false;
+            return createResponse(command.id, CommandStatus::SUCCESS, "Shutting down");
+        default:
+            return createResponse(command.id, CommandStatus::FAILED, "Unknown command");
+    }
+}
+
+void AgentCore::handleEvent(const Event& event) {
+    logger_->info("Handling event: " + event.type + " from module: " + std::to_string(static_cast<int>(event.module)));
+    
+    // Forward event to all connected clients
+    sendEventToClients(event);
+}
+
+void AgentCore::sendEventToClients(const Event& event) {
+    if (ipcServer_) {
+        ipcServer_->broadcastEvent(event);
+    }
+}
+
+bool AgentCore::validateParameters(const Command& command, const std::vector<std::string>& requiredParams) {
+    for (const auto& param : requiredParams) {
+        if (command.parameters.find(param) == command.parameters.end()) {
+            logger_->warning("Missing required parameter: " + param);
+            return false;
+        }
+    }
+    return true;
+}
+
+} // namespace SysMon

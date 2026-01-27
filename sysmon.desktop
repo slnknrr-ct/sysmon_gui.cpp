@@ -1,0 +1,10 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=SysMon3
+Comment=Cross-platform system monitoring and management tool
+Exec=sysmon_gui
+Icon=sysmon
+Terminal=false
+Categories=System;Monitor;
+Keywords=system;monitor;management;android;usb;network;

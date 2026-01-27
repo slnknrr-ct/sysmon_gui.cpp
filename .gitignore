@@ -1,0 +1,81 @@
+# Build directories
+build/
+build-*/
+cmake-build-*/
+
+# Compiled binaries
+*.exe
+sysmon_agent
+sysmon_gui
+lib*.a
+lib*.so
+lib*.dll
+
+# CMake files
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+*.cmake
+
+# Qt files
+*.pro.user*
+*.qbs.user*
+*.moc
+*.moc.cpp
+*.o
+*.obj
+
+# IDE files
+.vscode/
+.idea/
+*.vcxproj*
+*.sln
+*.user
+
+# Logs
+*.log
+sysmon_agent.log.*
+sysmon_gui.log.*
+
+# Configuration files
+sysmon_agent.conf
+sysmon_gui.conf
+
+# Temporary files
+*.tmp
+*.temp
+*~
+.DS_Store
+Thumbs.db
+
+# Screenshots and test data
+screenshot*.png
+test_data/
+*.adb
+
+# Package files
+*.deb
+*.rpm
+*.tar.gz
+*.zip
+*.nsis
+
+# Coverage reports
+coverage/
+*.gcov
+*.gcda
+*.gcno
+
+# Profiling data
+*.prof
+*.trace
+
+# Backup files
+*.bak
+*.backup
+
+# Android specific
+adb.exe
+adb
+adb.log

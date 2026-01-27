@@ -1,0 +1,119 @@
+# SysMon3 Agent Configuration File
+# This file contains default settings for the SysMon3 agent
+# Copy this file to sysmon_agent.conf and modify as needed
+
+# =============================================================================
+# AGENT SETTINGS
+# =============================================================================
+
+# IPC server port for GUI communication
+agent.ipc_port=12345
+
+# Log level: INFO, WARNING, ERROR
+agent.log_level=INFO
+
+# Log file path (relative to working directory or absolute)
+agent.log_file=sysmon_agent.log
+
+# =============================================================================
+# SYSTEM MONITOR SETTINGS
+# =============================================================================
+
+# Update interval in milliseconds
+system.update_interval=1000
+
+# =============================================================================
+# DEVICE MANAGER SETTINGS
+# =============================================================================
+
+# USB device scan interval in milliseconds
+devices.scan_interval=5000
+
+# =============================================================================
+# NETWORK MANAGER SETTINGS
+# =============================================================================
+
+# Network interface update interval in milliseconds
+network.update_interval=2000
+
+# =============================================================================
+# PROCESS MANAGER SETTINGS
+# =============================================================================
+
+# Process list update interval in milliseconds
+processes.update_interval=2000
+
+# Maximum number of processes to display in GUI
+processes.max_display=200
+
+# =============================================================================
+# ANDROID MANAGER SETTINGS
+# =============================================================================
+
+# Android device scan interval in milliseconds
+android.scan_interval=2000
+
+# ADB command timeout in milliseconds
+android.adb_timeout=5000
+
+# Maximum number of logcat lines to retrieve
+android.max_logcat_lines=100
+
+# =============================================================================
+# AUTOMATION SETTINGS
+# =============================================================================
+
+# Enable automation engine
+automation.enabled=true
+
+# Rule evaluation interval in milliseconds
+automation.evaluation_interval=1000
+
+# Maximum number of automation rules
+automation.max_rules=100
+
+# =============================================================================
+# LOGGING SETTINGS
+# =============================================================================
+
+# Maximum log file size in bytes (10MB default)
+log.max_file_size=10485760
+
+# Maximum number of backup log files
+log.max_backup_files=5
+
+# =============================================================================
+# SECURITY SETTINGS
+# =============================================================================
+
+# Allow only local connections (recommended)
+security.allow_local_only=true
+
+# Maximum number of concurrent GUI connections
+security.max_connections=10
+
+# Connection timeout in seconds
+security.connection_timeout=30
+
+# =============================================================================
+# PERFORMANCE SETTINGS
+# =============================================================================
+
+# Thread pool size for parallel operations
+performance.thread_pool_size=4
+
+# Maximum queue size for pending operations
+performance.max_queue_size=1000
+
+# =============================================================================
+# DEBUG SETTINGS
+# =============================================================================
+
+# Enable debug mode (additional logging)
+debug.enabled=false
+
+# Enable performance monitoring
+debug.performance_monitoring=false
+
+# Dump IPC messages to log
+debug.dump_ipc_messages=false
