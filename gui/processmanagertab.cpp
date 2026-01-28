@@ -738,5 +738,3 @@ QString ProcessManagerTab::formatPercentage(double value) const {
 }
 
 } // namespace SysMon
-
-#include "processmanagertab.moc"

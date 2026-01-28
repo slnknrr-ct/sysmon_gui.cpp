@@ -32,9 +32,19 @@ constexpr uint32_t DEFAULT_PROCESS_COUNT = 150;
 constexpr uint32_t DEFAULT_THREAD_COUNT = 320;
 
 // Network constants
-constexpr uint16_t DEFAULT_IPC_PORT = 8080;
+constexpr uint16_t DEFAULT_IPC_PORT = 12345;
 constexpr int DEFAULT_NETLINK_BUFFER_SIZE = 4096;
 constexpr int MAX_NETWORK_INTERFACES = 32;
+
+// Security constants
+constexpr size_t MAX_MESSAGE_SIZE = 1024 * 1024; // 1MB
+constexpr size_t MAX_CLIENTS = 10;
+constexpr std::chrono::seconds CLIENT_TIMEOUT{300}; // 5 minutes
+constexpr std::chrono::seconds AUTH_TOKEN_EXPIRY{3600}; // 1 hour
+constexpr size_t MAX_REQUESTS_PER_MINUTE = 100;
+constexpr std::chrono::seconds RATE_LIMIT_WINDOW{60}; // 1 minute
+constexpr int MAX_LOGIN_ATTEMPTS = 3;
+constexpr std::chrono::seconds LOCKOUT_DURATION{300}; // 5 minutes
 
 // Automation constants
 constexpr size_t MAX_AUTOMATION_RULES = 100;

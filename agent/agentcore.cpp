@@ -22,7 +22,13 @@ namespace SysMon {
 
 AgentCore::AgentCore() 
     : running_(false)
-    , initialized_(false) {
+    , initialized_(false)
+    , serializer_(&Serialization::Serializer::getInstance())
+    , securityManager_(&Security::SecurityManager::getInstance()) {
+    
+    // Initialize logging
+    Logging::LogManager::getInstance().initialize("sysmon_agent.log", Logging::LogLevel::INFO);
+    LOG_INFO_CAT("AgentCore", "AgentCore constructor completed");
 }
 
 AgentCore::~AgentCore() {
@@ -30,92 +36,80 @@ AgentCore::~AgentCore() {
 }
 
 bool AgentCore::initialize() {
+    LOG_FUNCTION_INFO("Initializing AgentCore");
+    
     if (initialized_) {
+        LOG_WARNING_CAT("AgentCore", "AgentCore already initialized");
         return true;
     }
     
-    std::cout << "Initializing Agent Core..." << std::endl;
-    
-    // Initialize logger first
-    logger_ = std::make_unique<Logger>();
-    if (!logger_->initialize("sysmon_agent.log", LogLevel::INFO)) {
-        std::cerr << "Failed to initialize logger" << std::endl;
+    try {
+        LOG_INFO_CAT("AgentCore", "Creating logger");
+        logger_ = std::make_unique<Logger>();
+        if (!logger_->initialize("sysmon_agent.log", LogLevel::INFO)) {
+            LOG_ERROR_CAT("AgentCore", "Failed to initialize logger");
+            return false;
+        }
+        
+        LOG_INFO_CAT("AgentCore", "Initializing components");
+        if (!initializeComponents()) {
+            LOG_ERROR_CAT("AgentCore", "Failed to initialize components");
+            return false;
+        }
+        
+        initialized_ = true;
+        LOG_INFO_CAT("AgentCore", "AgentCore initialization completed successfully");
+        return true;
+        
+    } catch (const std::exception& e) {
+        LOG_ERROR_CAT("AgentCore", "Initialization failed: " + std::string(e.what()));
         return false;
     }
-    if (!initializeComponents()) {
-        logger_->error("Failed to initialize components");
-        return false;
-    }
-    
-    initialized_ = true;
-    logger_->info("Agent Core initialized successfully");
-    return true;
 }
 
 bool AgentCore::start() {
+    LOG_FUNCTION_INFO("Starting AgentCore");
+    
     if (!initialized_) {
-        logger_->error("Agent Core not initialized");
+        LOG_ERROR_CAT("AgentCore", "AgentCore not initialized");
         return false;
     }
     
     if (running_) {
-        logger_->warning("Agent Core already running");
+        LOG_WARNING_CAT("AgentCore", "AgentCore already running");
         return true;
     }
     
-    logger_->info("Starting Agent Core...");
-    
-    // Start IPC server
-    if (!ipcServer_->start()) {
-        logger_->error("Failed to start IPC server");
+    try {
+        LOG_INFO_CAT("AgentCore", "Starting IPC server");
+        if (!ipcServer_->start()) {
+            LOG_ERROR_CAT("AgentCore", "Failed to start IPC server");
+            return false;
+        }
+        
+        LOG_INFO_CAT("AgentCore", "Starting worker thread");
+        running_ = true;
+        workerThread_ = std::thread(&AgentCore::workerThread, this);
+        
+        LOG_INFO_CAT("AgentCore", "AgentCore started successfully");
+        return true;
+        
+    } catch (const std::exception& e) {
+        LOG_ERROR_CAT("AgentCore", "Failed to start AgentCore: " + std::string(e.what()));
+        running_ = false;
         return false;
     }
-    
-    // Start monitoring components
-    if (!systemMonitor_->start()) {
-        logger_->error("Failed to start system monitor");
-        return false;
-    }
-    
-    if (!deviceManager_->start()) {
-        logger_->error("Failed to start device manager");
-        return false;
-    }
-    
-    if (!networkManager_->start()) {
-        logger_->error("Failed to start network manager");
-        return false;
-    }
-    
-    if (!processManager_->start()) {
-        logger_->error("Failed to start process manager");
-        return false;
-    }
-    
-    if (!androidManager_->start()) {
-        logger_->error("Failed to start android manager");
-        return false;
-    }
-    
-    if (!automationEngine_->start()) {
-        logger_->error("Failed to start automation engine");
-        return false;
-    }
-    
-    // Start worker thread
-    running_ = true;
-    workerThread_ = std::thread(&AgentCore::workerThread, this);
-    
-    logger_->info("Agent Core started successfully");
-    return true;
 }
 
 void AgentCore::stop() {
+    LOG_FUNCTION_INFO("Stopping AgentCore");
+    
     if (!running_) {
+        LOG_WARNING_CAT("AgentCore", "AgentCore not running");
         return;
     }
     
-    logger_->info("Stopping Agent Core...");
+    LOG_INFO_CAT("AgentCore", "Stopping AgentCore...");
     running_ = false;
     
     // Stop components
@@ -132,13 +126,18 @@ void AgentCore::stop() {
         workerThread_.join();
     }
     
-    logger_->info("Agent Core stopped");
+    LOG_INFO_CAT("AgentCore", "AgentCore stopped successfully");
 }
 
 void AgentCore::shutdown() {
+    LOG_FUNCTION_INFO("Shutting down AgentCore");
     stop();
     cleanupComponents();
     initialized_ = false;
+    
+    // Shutdown logging
+    Logging::LogManager::getInstance().shutdown();
+    LOG_INFO_CAT("AgentCore", "AgentCore shutdown completed");
 }
 
 bool AgentCore::isRunning() const {
@@ -283,8 +282,16 @@ void AgentCore::workerThread() {
         try {
             // Process any pending commands or events
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            
+            // Cleanup serializer cache periodically
+            static int cleanupCounter = 0;
+            if (++cleanupCounter >= 600) { // Every minute
+                serializer_->clearCache();
+                cleanupCounter = 0;
+            }
+            
         } catch (const std::exception& e) {
-            logger_->error("Exception in worker thread: " + std::string(e.what()));
+            logError("workerThread", e);
         }
     }
     
@@ -292,9 +299,17 @@ void AgentCore::workerThread() {
 }
 
 Response AgentCore::handleCommand(const Command& command) {
-    logger_->info("Handling command: " + commandTypeToString(command.type));
+    std::lock_guard<std::mutex> lock(commandMutex_);
+    
+    logCommand(command, "started");
     
     try {
+        // Validate command parameters
+        if (!securityManager_->validateCommand(IpcProtocol::serializeCommand(command))) {
+            logCommand(command, "invalid_command");
+            return createResponse(command.id, CommandStatus::FAILED, "Invalid command format");
+        }
+        
         switch (command.module) {
             case Module::SYSTEM:
                 return handleSystemCommand(command);
@@ -309,73 +324,56 @@ Response AgentCore::handleCommand(const Command& command) {
             case Module::AUTOMATION:
                 return handleAutomationCommand(command);
             default:
+                logCommand(command, "unknown_module");
                 return handleGenericCommand(command);
         }
     } catch (const std::exception& e) {
-        logger_->error("Exception handling command: " + std::string(e.what()));
+        logError("handleCommand", e);
+        logCommand(command, "exception");
         return createResponse(command.id, CommandStatus::FAILED, e.what());
     }
 }
 
 Response AgentCore::handleSystemCommand(const Command& command) {
+    std::shared_lock<std::shared_mutex> lock(componentsMutex_);
+    
     try {
         switch (command.type) {
             case CommandType::GET_SYSTEM_INFO: {
                 if (!systemMonitor_) {
+                    logCommand(command, "system_monitor_unavailable");
                     return createResponse(command.id, CommandStatus::FAILED, "System monitor not available");
                 }
                 
                 auto info = systemMonitor_->getCurrentSystemInfo();
-                std::map<std::string, std::string> data;
+                std::string serializedData = serializer_->serializeSystemInfo(info);
                 
-                // Serialize system info
-                data["cpu_total"] = std::to_string(info.cpuUsageTotal);
-                data["memory_total"] = std::to_string(info.memoryTotal);
-                data["memory_used"] = std::to_string(info.memoryUsed);
-                data["memory_free"] = std::to_string(info.memoryFree);
-                data["process_count"] = std::to_string(info.processCount);
-                data["thread_count"] = std::to_string(info.threadCount);
-                data["uptime"] = std::to_string(info.uptime.count());
-                
-                // CPU cores usage
-                for (size_t i = 0; i < info.cpuCoresUsage.size(); ++i) {
-                    data["cpu_core_" + std::to_string(i)] = std::to_string(info.cpuCoresUsage[i]);
-                }
-                
-                return createResponse(command.id, CommandStatus::SUCCESS, "System info retrieved", data);
+                logCommand(command, "success");
+                return createResponse(command.id, CommandStatus::SUCCESS, "System info retrieved", 
+                                    {{"data", serializedData}});
             }
             
             case CommandType::GET_PROCESS_LIST: {
                 if (!processManager_) {
+                    logCommand(command, "process_manager_unavailable");
                     return createResponse(command.id, CommandStatus::FAILED, "Process manager not available");
                 }
                 
                 auto processes = processManager_->getProcessList();
-                std::map<std::string, std::string> data;
+                std::string serializedData = serializer_->serializeProcessList(processes);
                 
-                // Serialize process list
-                data["process_count"] = std::to_string(processes.size());
-                
-                for (size_t i = 0; i < processes.size() && i < 100; ++i) { // Limit to 100 processes
-                    const auto& proc = processes[i];
-                    std::string prefix = "proc_" + std::to_string(i) + "_";
-                    data[prefix + "pid"] = std::to_string(proc.pid);
-                    data[prefix + "name"] = proc.name;
-                    data[prefix + "cpu"] = std::to_string(proc.cpuUsage);
-                    data[prefix + "memory"] = std::to_string(proc.memoryUsage);
-                    data[prefix + "status"] = proc.status;
-                    data[prefix + "parent_pid"] = std::to_string(proc.parentPid);
-                    data[prefix + "user"] = proc.user;
-                }
-                
-                return createResponse(command.id, CommandStatus::SUCCESS, "Process list retrieved", data);
+                logCommand(command, "success");
+                return createResponse(command.id, CommandStatus::SUCCESS, "Process list retrieved", 
+                                    {{"data", serializedData}});
             }
             
             default:
+                logCommand(command, "unknown_system_command");
                 return createResponse(command.id, CommandStatus::FAILED, "Unknown system command");
         }
     } catch (const std::exception& e) {
-        logger_->error("Exception in handleSystemCommand: " + std::string(e.what()));
+        logError("handleSystemCommand", e);
+        logCommand(command, "exception");
         return createResponse(command.id, CommandStatus::FAILED, e.what());
     }
 }
@@ -889,6 +887,19 @@ bool AgentCore::validateParameters(const Command& command, const std::vector<std
         }
     }
     return true;
+}
+
+void AgentCore::logCommand(const Command& command, const std::string& status) {
+    if (logger_) {
+        logger_->info("Command " + commandTypeToString(command.type) + 
+                     " [" + command.id + "] - " + status);
+    }
+}
+
+void AgentCore::logError(const std::string& function, const std::exception& e) {
+    if (logger_) {
+        logger_->error("Exception in " + function + ": " + std::string(e.what()));
+    }
 }
 
 } // namespace SysMon

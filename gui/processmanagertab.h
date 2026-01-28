@@ -14,6 +14,7 @@
 #include <QInputDialog>
 #include <memory>
 #include "../shared/systemtypes.h"
+#include "ipcclient.h"
 
 QT_BEGIN_NAMESPACE
 class QTableWidget;
@@ -24,9 +25,6 @@ class QGroupBox;
 class QLineEdit;
 class QMessageBox;
 QT_END_NAMESPACE
-
-// Forward declarations
-class IpcClient;
 
 namespace SysMon {
 

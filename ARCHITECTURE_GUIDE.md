@@ -1,53 +1,367 @@
-# SysMon3 Architecture Guide
+# SysMon3 Enterprise Architecture Guide
 
-This document provides a comprehensive overview of the SysMon3 project architecture, including component relationships, data flow, and system design.
+This document provides a comprehensive overview of the SysMon3 enterprise-grade architecture, including security features, component relationships, data flow, and system design patterns.
 
-## Project Overview
+## 🏗️ Enterprise Architecture Overview
 
-SysMon3 is a cross-platform system monitoring and management tool consisting of two main components:
-- **Agent** - Background service that monitors system resources
-- **GUI** - Qt-based graphical user interface for visualization and control
+SysMon3 is a production-ready system monitoring and management tool featuring a secure two-component architecture with enterprise-grade security, performance optimization, and comprehensive error handling.
 
-## High-Level Architecture
+### Core Design Principles
+- **Security First**: Defense-in-depth with multiple validation layers
+- **Performance Optimized**: Efficient memory management and asynchronous operations
+- **Thread Safety**: Full concurrency support with proper synchronization
+- **Scalability**: Support for multiple concurrent clients
+- **Reliability**: Comprehensive error handling and graceful degradation
+
+## 🔒 Security Architecture
+
+### Multi-Layer Security Model
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    Application Layer                        │
+│  ┌─────────────────┐    Authenticated IPC     ┌─────────────────┐ │
+│  │   GUI Client    │ ◄──────────────────────► │   Agent Server  │ │
+│  │                 │                           │                 │ │
+│  │ - Qt Interface  │                           │ - Token Auth    │ │
+│  │ - IPC Client    │                           │ - Rate Limiting │ │
+│  │ - Input Valid.  │                           │ - Input Valid.  │ │
+│  └─────────────────┘                           └─────────────────┘ │
+└─────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────┐
+│                    Security Layer                            │
+│  ┌─────────────────┐    Encrypted Channel     ┌─────────────────┐ │
+│  │   Security      │ ◄──────────────────────► │   Security      │ │
+│  │   Manager       │                           │   Manager       │ │
+│  │                 │                           │                 │ │
+│  │ - Token Gen     │                           │ - Token Valid.  │ │
+│  │ - Rate Limit    │                           │ - Account Lock  │ │
+│  │ - Input Sanit.  │                           │ - Audit Log     │ │
+│  └─────────────────┘                           └─────────────────┘ │
+└─────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────┐
+│                    System Layer                              │
+│  ┌─────────────────┐    System Calls          ┌─────────────────┐ │
+│  │   OS APIs       │ ◄──────────────────────► │   Protected     │ │
+│  │                 │                           │   Resources     │ │
+│  │ - File System  │                           │ - Devices       │ │
+│  │ - Network      │                           │ - Processes     │ │
+│  │ - Android ADB   │                           │ - Android       │ │
+│  └─────────────────┘                           └─────────────────┘ │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Security Components
+- **Token-based Authentication**: Cryptographic secure tokens using OpenSSL
+- **Rate Limiting**: 100 requests/minute with configurable limits
+- **Input Validation**: Comprehensive validation against injection attacks
+- **Account Lockout**: Automatic blocking after failed attempts
+- **Audit Logging**: Complete security event logging with timestamps
+
+## 🏛️ High-Level Architecture
 
 ```
-┌─────────────────┐    TCP/IP     ┌─────────────────┐
-│   GUI Client    │ ◄──────────► │   Agent Server  │
-│                 │               │                 │
-│ - Qt Interface  │               │ - System Monitor│
-│ - IPC Client    │               │ - Device Manager│
-│ - Tab Views     │               │ - Network Manager│
-└─────────────────┘               │ - Process Manager│
-                                 │ - Android Manager│
-                                 │ - Automation Engine│
-                                 └─────────────────┘
+┌─────────────────────────────────────────────────────────────┐
+│                    GUI Client Layer                         │
+│  ┌─────────────────┐    Secure TCP/IP        ┌─────────────────┐ │
+│  │   MainWindow    │ ◄──────────────────────► │   IpcServer     │ │
+│  │                 │                           │                 │ │
+│  │ - SystemMonitor │                           │ - Auth Handler  │ │
+│  │ - ProcessMgr    │                           │ - Rate Limiter  │ │
+│  │ - DeviceMgr     │                           │ - Message Valid │ │
+│  │ - NetworkMgr    │                           │ - Client Mgmt   │ │
+│  │ - AndroidTab    │                           └─────────────────┘ │
+│  │ - AutomationTab │                                     │ │
+│  └─────────────────┘                                     │ │
+└─────────────────────────────────────────────────────────────┘
+                                │
+                                ▼
+┌─────────────────────────────────────────────────────────────┐
+│                    Agent Core Layer                         │
+│  ┌─────────────────┐    Component Coord.     ┌─────────────────┐ │
+│  │   AgentCore     │ ◄──────────────────────► │   Managers      │ │
+│  │                 │                           │                 │ │
+│  │ - Lifecycle Mgmt│                           │ - SystemMonitor │ │
+│  │ - Command Disp. │                           │ - DeviceManager │ │
+│  │ - Event Broadcast│                           │ - NetworkManager│ │
+│  │ - Error Handling │                           │ - ProcessManager│ │
+│  │ - Thread Safety │                           │ - AndroidManager│ │
+│  │ - Serialization │                           │ - AutomationEng │ │
+│  └─────────────────┘                           └─────────────────┘ │
+└─────────────────────────────────────────────────────────────┘
+                                │
+                                ▼
+┌─────────────────────────────────────────────────────────────┐
+│                    System Resources Layer                    │
+│  ┌─────────────────┐    OS Abstraction         ┌─────────────────┐ │
+│  │   Shared Lib    │ ◄──────────────────────► │   OS APIs       │ │
+│  │                 │                           │                 │ │
+│  │ - Data Types    │                           │ - Linux/Windows │ │
+│  │ - Commands      │                           │ - File System   │ │
+│  │ - Security      │                           │ - Network Stack │ │
+│  │ - Serialization │                           │ - Process Mgmt  │ │
+│  │ - Validation    │                           │ - Android ADB   │ │
+│  │ - Logging       │                           │ - USB Devices   │ │
+│  └─────────────────┘                           └─────────────────┘ │
+└─────────────────────────────────────────────────────────────┘
 ```
 
-## Directory Structure
+## 📁 Enhanced Directory Structure
 
 ```
 sysmon3_gui.cpp/
-├── CMakeLists.txt          # Main build configuration
-├── .build.bat             # Windows build script
-├── sysmon.desktop         # Linux desktop entry
-├── sysmon_agent.conf.example # Agent configuration template
-├── agent/                 # Agent server component
+├── CMakeLists.txt              # Main build configuration
+├── .build.bat                 # Windows build script
+├── sysmon.desktop             # Linux desktop entry
+├── sysmon_agent.conf.example  # Agent configuration template
+├── shared/                    # Shared library components
 │   ├── CMakeLists.txt
-│   ├── main.cpp           # Agent entry point
-│   ├── agentcore.h/cpp    # Core agent orchestration
-│   ├── ipcserver.h/cpp    # IPC server implementation
-│   ├── systemmonitor.h/cpp # System monitoring
-│   ├── devicemanager.h/cpp # Device management
-│   ├── networkmanager.h/cpp # Network monitoring
-│   ├── processmanager.h/cpp # Process management
-│   ├── androidmanager.h/cpp # Android device management
-│   ├── automationengine.h/cpp # Automation rules engine
-│   ├── logger.h/cpp       # Logging system
-│   └── configmanager.h/cpp # Configuration management
-├── gui/                   # GUI client component
+│   ├── systemtypes.h/cpp      # Core data structures with validation
+│   ├── commands.h/cpp         # IPC command definitions
+│   ├── ipcprotocol.h/cpp      # IPC protocol implementation
+│   ├── security.h/cpp         # 🔒 Security & authentication
+│   ├── serializer.h/cpp       # 🚀 High-performance serialization
+│   ├── logger.h/cpp           # 📝 Comprehensive logging system
+│   └── constants.h            # System constants & limits
+├── agent/                     # Agent server component
 │   ├── CMakeLists.txt
-│   ├── main.cpp           # GUI entry point
-│   ├── mainwindow.h/cpp   # Main application window
+│   ├── main.cpp               # Thread-safe agent entry point
+│   ├── agentcore.h/cpp        # Core orchestration with error handling
+│   ├── ipcserver.h/cpp        # Secure IPC server with auth
+│   ├── systemmonitor.h/cpp    # System monitoring with validation
+│   ├── devicemanager.h/cpp    # Device management with safety
+│   ├── networkmanager.h/cpp   # Network monitoring with security
+│   ├── processmanager.h/cpp   # Process management with protection
+│   ├── androidmanager.h/cpp   # Android integration with validation
+│   ├── automationengine.h/cpp # Rules engine with safety checks
+│   ├── logger.h/cpp           # Legacy logging (deprecated)
+│   └── configmanager.h/cpp    # Configuration with validation
+├── gui/                       # GUI client component
+│   ├── CMakeLists.txt
+│   ├── main.cpp               # GUI entry point
+│   ├── mainwindow.h/cpp       # Main window with error handling
+│   ├── ipcclient.h/cpp        # Secure IPC client with auth
+│   ├── systemmonitortab.h/cpp # System monitoring UI
+│   ├── processmanagertab.h/cpp # Process management UI
+│   ├── devicemanagertab.h/cpp # Device management UI
+│   ├── networkmanagertab.h/cpp # Network management UI
+│   ├── androidtab.h/cpp      # Android integration UI
+│   └── automationtab.h/cpp   # Automation rules UI
+└── docs/                      # Documentation
+    ├── API_REFERENCE.md       # Complete API documentation
+    ├── SECURITY_GUIDE.md      # Security implementation guide
+    └── TESTING_GUIDE.md       # Testing procedures
+```
+
+## 🔄 Data Flow Architecture
+
+### Secure Command Flow
+```
+GUI Client ──► IpcClient ──► Security Manager ──► IpcServer ──► AgentCore ──► Managers
+     │              │              │                 │             │           │
+     │              │              │                 │             │           ▼
+     │              │              │                 │             │      System APIs
+     │              │              │                 │             │
+     │              │              │                 │             │
+     │              │              │                 ▼             │
+     │              │              │            Rate Limiting      │
+     │              │              │                 │             │
+     │              │              ▼                 │             │
+     │              │         Token Validation      │             │
+     │              │              │                 │             │
+     │              ▼              │                 │             │
+     │         Input Sanitization   │                 │             │
+     │              │              │                 │             │
+     ▼              │              │                 │             │
+JSON Serialization│              │                 │             │
+```
+
+### Event Broadcasting Flow
+```
+Managers ──► AgentCore ──► Event Serializer ──► IpcServer ──► Authenticated Clients
+    │            │              │                 │              │
+    │            │              │                 │              ▼
+    │            │              │                 │         GUI Updates
+    │            │              │                 │
+    │            │              ▼                 │
+    │            │         Event Validation      │
+    │            │              │                 │
+    │            ▼              │                 │
+    │       Event Filtering     │                 │
+    │            │              │                 │
+    ▼            │              │                 │
+System Events │              │                 │
+```
+
+## 🧵 Threading Architecture
+
+### Agent Threading Model
+```
+Main Thread
+├── IPC Server Thread Pool
+│   ├── Client Handler Thread 1
+│   ├── Client Handler Thread 2
+│   ├── Client Handler Thread N
+│   └── Authentication Thread
+├── Worker Thread
+│   ├── Background Tasks
+│   ├── Periodic Cleanup
+│   └── Cache Management
+├── Manager Threads
+│   ├── System Monitor Thread
+│   ├── Device Manager Thread
+│   ├── Network Manager Thread
+│   ├── Process Manager Thread
+│   ├── Android Manager Thread
+│   └── Automation Engine Thread
+└── Logging Thread (Async)
+```
+
+### Thread Safety Mechanisms
+- **shared_mutex**: Multiple readers, exclusive writers for components
+- **mutex**: Exclusive access for command processing
+- **atomic**: Thread-safe flags and counters
+- **condition_variable**: Thread synchronization
+- **lock_guard**: RAII mutex management
+- **unique_lock**: Flexible mutex management
+
+## 🚀 Performance Architecture
+
+### Memory Management
+```
+Memory Pool Manager
+├── String Pool (100 strings)
+├── Serialization Buffer Pool
+├── Command Object Pool
+└── Response Object Pool
+```
+
+### Optimization Features
+- **Memory Pooling**: Reduced allocation overhead
+- **Smart Caching**: Intelligent data caching strategies
+- **Lazy Loading**: Load data only when needed
+- **Batch Processing**: Process multiple items together
+- **Async Operations**: Non-blocking I/O throughout
+- **Zero-Copy**: Minimize data copying where possible
+
+## 🛡️ Security Implementation Details
+
+### Authentication Flow
+```
+1. Client Connection
+   └── Generate Secure Token
+2. Authentication Request
+   └── Send Token + Client ID
+3. Server Validation
+   ├── Verify Token Format
+   ├── Check Rate Limits
+   └── Validate Client ID
+4. Session Establishment
+   ├── Mark as Authenticated
+   ├── Start Rate Limiting
+   └── Begin Audit Logging
+```
+
+### Input Validation Pipeline
+```
+Input Data
+├── Size Validation (≤1MB)
+├── Format Validation (JSON)
+├── Content Validation (no injection)
+├── Parameter Validation (type/range)
+└── Business Logic Validation
+```
+
+## 📊 Monitoring & Observability
+
+### Logging Architecture
+```
+LogManager
+├── FileLogger (with rotation)
+├── ConsoleLogger (colored)
+├── AsyncLogger (performance)
+└── CompositeLogger (multiple outputs)
+```
+
+### Metrics Collection
+- **Performance Metrics**: CPU, memory, network usage
+- **Security Metrics**: Authentication attempts, rate limiting
+- **Business Metrics**: Command counts, error rates
+- **System Metrics**: Thread counts, connection status
+
+## 🔧 Configuration Architecture
+
+### Configuration Hierarchy
+```
+Default Values
+├── Configuration File
+├── Environment Variables
+├── Command Line Arguments
+└── Runtime Overrides
+```
+
+### Configuration Categories
+- **Server Settings**: Port, client limits, timeouts
+- **Security Settings**: Authentication, rate limiting, encryption
+- **Logging Settings**: Levels, files, rotation
+- **Performance Settings**: Thread pools, memory limits
+- **Feature Settings**: Module enables/disables
+
+## 🚦 Error Handling Architecture
+
+### Error Handling Strategy
+```
+Error Detection
+├── Input Validation Errors
+├── System Call Errors
+├── Network Errors
+├── Authentication Errors
+└── Business Logic Errors
+```
+
+### Error Recovery
+- **Graceful Degradation**: Continue operation with reduced functionality
+- **Automatic Retry**: Retry transient failures with exponential backoff
+- **Circuit Breaker**: Stop trying failing services temporarily
+- **Fallback Values**: Use sensible defaults when data unavailable
+
+## 📈 Scalability Architecture
+
+### Horizontal Scaling
+- **Multiple GUI Clients**: Support up to 10 concurrent clients
+- **Load Distribution**: Efficient command distribution
+- **Resource Management**: Proper resource cleanup and limits
+
+### Vertical Scaling
+- **Thread Pool Tuning**: Configurable thread pool sizes
+- **Memory Management**: Efficient memory usage patterns
+- **CPU Optimization**: Minimize CPU overhead
+
+## 🔮 Future Extensibility
+
+### Plugin Architecture
+- **Manager Plugins**: Easy addition of new managers
+- **GUI Plugins**: Extensible GUI components
+- **Protocol Plugins**: Support for different IPC protocols
+
+### Extension Points
+- **Custom Commands**: Add new command types
+- **Custom Events**: Add new event types
+- **Custom Validators**: Add new validation rules
+- **Custom Loggers**: Add new logging destinations
+
+---
+
+## 🎯 Architecture Summary
+
+SysMon3's enterprise architecture provides:
+- **🔒 Security**: Multi-layer security with authentication and validation
+- **🚀 Performance**: Optimized memory management and asynchronous operations
+- **🧵 Thread Safety**: Full concurrency support with proper synchronization
+- **📊 Observability**: Comprehensive logging and monitoring
+- **🛡️ Reliability**: Robust error handling and graceful degradation
+- **📈 Scalability**: Support for multiple clients and future growth
+
+This architecture ensures SysMon3 meets enterprise requirements for security, performance, and reliability while maintaining flexibility for future enhancements.
 │   ├── ipcclient.h/cpp    # IPC client implementation
 │   ├── systemmonitortab.h/cpp # System monitor tab
 │   ├── devicemanagertab.h/cpp # Device manager tab

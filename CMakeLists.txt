@@ -19,7 +19,13 @@ else()
 endif()
 
 # Find Qt6
-find_package(Qt6 REQUIRED COMPONENTS Core Widgets)
+find_package(Qt6 REQUIRED COMPONENTS Core Widgets Network)
+
+# Find OpenSSL for security features (optional)
+option(SYSMON_NO_OPENSSL "Build without OpenSSL support" OFF)
+if(NOT SYSMON_NO_OPENSSL)
+    find_package(OpenSSL REQUIRED)
+endif()
 
 # Set Qt6 options
 set(Qt6_DIR "${CMAKE_PREFIX_PATH}")

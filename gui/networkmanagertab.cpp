@@ -499,5 +499,3 @@ void NetworkManagerTab::setStaticIpForSelectedInterface(const QString& ip, const
 }
 
 } // namespace SysMon
-
-#include "networkmanagertab.moc"

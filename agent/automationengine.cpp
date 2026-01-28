@@ -43,8 +43,8 @@ void AutomationEngine::shutdown() {
     
     running_ = false;
     
-    if (evaluationThread_.joinable()) {
-        evaluationThread_.join();
+    if (automationThread_.joinable()) {
+        automationThread_.join();
     }
     
     initialized_ = false;
@@ -60,7 +60,7 @@ bool AutomationEngine::start() {
     }
     
     running_ = true;
-    evaluationThread_ = std::thread(&AutomationEngine::evaluationThread, this);
+    automationThread_ = std::thread(&AutomationEngine::automationThread, this);
     
     return true;
 }
@@ -68,15 +68,15 @@ bool AutomationEngine::start() {
 void AutomationEngine::stop() {
     running_ = false;
     
-    if (evaluationThread_.joinable()) {
-        evaluationThread_.join();
+    if (automationThread_.joinable()) {
+        automationThread_.join();
     }
 }
 
-void AutomationEngine::evaluationThread() {
+void AutomationEngine::automationThread() {
     while (running_) {
         try {
-            evaluateAllRules();
+            evaluateRules();
             
             std::this_thread::sleep_for(evaluationInterval_);
             
@@ -87,52 +87,23 @@ void AutomationEngine::evaluationThread() {
     }
 }
 
-void AutomationEngine::evaluateAllRules() {
+void AutomationEngine::evaluateRules() {
     std::shared_lock<std::shared_mutex> lock(rulesMutex_);
     
     for (auto& rule : rules_) {
         if (rule.isEnabled) {
-            evaluateRule(rule);
+            // Simple evaluation logic for now
+            try {
+                bool conditionMet = evaluateCondition(rule.condition);
+                if (conditionMet) {
+                    executeAction(rule.action);
+                }
+            } catch (const std::exception& e) {
+                // Log error but continue with other rules
+                continue;
+            }
         }
     }
-}
-
-bool AutomationEngine::evaluateRule(AutomationRule& rule) {
-    // Temporary simplified implementation
-    try {
-        bool conditionMet = evaluateCondition(rule.condition);
-        
-        if (conditionMet) {
-            // Check duration requirement
-            auto now = std::chrono::steady_clock::now();
-            auto it = conditionTimers_.find(rule.id);
-            
-            if (it == conditionTimers_.end()) {
-                // Start timer
-                conditionTimers_[rule.id] = now;
-                return false;
-            }
-            
-            // Check if duration has passed
-            auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - it->second);
-            if (elapsed >= rule.duration) {
-                // Execute action
-                executeAction(rule.action);
-                
-                // Reset timer
-                conditionTimers_[rule.id] = now;
-                return true;
-            }
-        } else {
-            // Reset timer if condition is not met
-            conditionTimers_.erase(rule.id);
-        }
-        
-    } catch (const std::exception& e) {
-        // Log error
-    }
-    
-    return false;
 }
 
 bool AutomationEngine::evaluateCondition(const std::string& condition) {
@@ -230,12 +201,12 @@ std::vector<AutomationRule> AutomationEngine::getRules() const {
     return rules_;
 }
 
-bool AutomationEngine::isValidCondition(const std::string& condition) {
+bool AutomationEngine::isValidCondition(const std::string& condition) const {
     // Temporary simplified validation
     return !condition.empty() && condition.length() > 3;
 }
 
-bool AutomationEngine::isValidAction(const std::string& action) {
+bool AutomationEngine::isValidAction(const std::string& action) const {
     // Temporary simplified validation
     return !action.empty() && action.length() > 3;
 }

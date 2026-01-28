@@ -3,26 +3,21 @@
 #include <QWidget>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
-#include <QTableWidget>
-#include <QPushButton>
+#include <QGridLayout>
 #include <QLabel>
-#include <QTimer>
+#include <QPushButton>
+#include <QTableWidget>
 #include <QGroupBox>
-#include <QHeaderView>
-#include <QMessageBox>
+#include <QTimer>
 #include <memory>
 #include "../shared/systemtypes.h"
+#include "ipcclient.h"
 
 QT_BEGIN_NAMESPACE
 class QTableWidget;
-class QPushButton;
-class QLabel;
-class QTimer;
 class QGroupBox;
+class QTimer;
 QT_END_NAMESPACE
-
-// Forward declarations
-class IpcClient;
 
 namespace SysMon {
 

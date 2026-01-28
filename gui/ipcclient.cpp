@@ -40,7 +40,7 @@ IpcClient::~IpcClient() {
     disconnectFromAgent();
 }
 
-bool IpcClient::connectToAgent(const QString& host, int port) {
+bool IpcClient::connectToAgent(const std::string& host, int port) {
     if (connected_) {
         return true;
     }
@@ -48,11 +48,11 @@ bool IpcClient::connectToAgent(const QString& host, int port) {
     host_ = host;
     port_ = port;
     
-    socket_->connectToHost(host, port);
+    socket_->connectToHost(QString::fromStdString(host), port);
     
     // Wait for connection (with timeout)
     if (!socket_->waitForConnected(CONNECTION_TIMEOUT)) {
-        lastError_ = socket_->errorString();
+        lastError_ = socket_->errorString().toStdString();
         return false;
     }
     
@@ -80,12 +80,12 @@ bool IpcClient::isConnected() const {
     return connected_;
 }
 
-QString IpcClient::sendCommand(const Command& command, ResponseHandler handler) {
-    QString commandId = generateCommandId();
+std::string IpcClient::sendCommand(const Command& command, ResponseHandler handler) {
+    std::string commandId = generateCommandId();
     
     // Create a copy of the command with the new ID
     Command cmdWithId = command;
-    cmdWithId.id = commandId.toStdString();
+    cmdWithId.id = commandId;
     
     // Store pending command
     PendingCommand pending;
@@ -108,7 +108,7 @@ QString IpcClient::sendCommand(const Command& command, ResponseHandler handler) 
     return commandId;
 }
 
-QString IpcClient::sendCommandAsync(const Command& command, ResponseHandler handler) {
+std::string IpcClient::sendCommandAsync(const Command& command, ResponseHandler handler) {
     return sendCommand(command, handler);
 }
 
@@ -124,15 +124,15 @@ void IpcClient::setConnectionHandler(ConnectionHandler handler) {
     connectionHandler_ = handler;
 }
 
-QString IpcClient::getConnectionStatus() const {
+std::string IpcClient::getConnectionStatus() const {
     if (connected_) {
-        return "Connected to " + host_ + ":" + QString::number(port_);
+        return "Connected to " + host_ + ":" + std::to_string(port_);
     } else {
         return "Disconnected";
     }
 }
 
-QString IpcClient::getLastError() const {
+std::string IpcClient::getLastError() const {
     return lastError_;
 }
 
@@ -174,7 +174,7 @@ void IpcClient::onSocketDisconnected() {
 }
 
 void IpcClient::onSocketError(QAbstractSocket::SocketError error) {
-    lastError_ = socket_->errorString();
+    lastError_ = socket_->errorString().toStdString();
     
     if (error != QAbstractSocket::RemoteHostClosedError) {
         emit errorOccurred(lastError_);
@@ -209,10 +209,10 @@ void IpcClient::onConnectionTimer() {
         reconnectAttempts_++;
         
         if (socket_->state() == QAbstractSocket::UnconnectedState) {
-            socket_->connectToHost(host_, port_);
+            socket_->connectToHost(QString::fromStdString(host_), port_);
         }
         
-        emit errorOccurred(QString("Reconnection attempt %1/%2").arg(reconnectAttempts_).arg(MAX_RECONNECT_ATTEMPTS));
+        emit errorOccurred("Reconnection attempt " + std::to_string(reconnectAttempts_) + "/" + std::to_string(MAX_RECONNECT_ATTEMPTS));
     } else if (reconnectAttempts_ >= MAX_RECONNECT_ATTEMPTS) {
         connectionTimer_->stop();
         emit errorOccurred("Maximum reconnection attempts reached");
@@ -309,10 +309,8 @@ void IpcClient::startReconnection() {
     }
 }
 
-QString IpcClient::generateCommandId() {
-    return QString::number(++commandCounter_) + "_" + QString::number(std::chrono::system_clock::now().time_since_epoch().count());
+std::string IpcClient::generateCommandId() {
+    return std::to_string(++commandCounter_) + "_" + std::to_string(std::chrono::system_clock::now().time_since_epoch().count());
 }
 
 } // namespace SysMon
-
-#include "ipcclient.moc"

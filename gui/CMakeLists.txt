@@ -47,6 +47,7 @@ target_link_libraries(sysmon_gui
     PRIVATE
     Qt6::Core
     Qt6::Widgets
+    Qt6::Network
     sysmon_shared
 )
 
@@ -76,6 +77,11 @@ target_compile_definitions(sysmon_gui
     PRIVATE
     SYSMON_GUI_EXPORTS
 )
+
+# Add SYSMON_NO_OPENSSL definition if needed
+if(SYSMON_NO_OPENSSL)
+    target_compile_definitions(sysmon_gui PRIVATE SYSMON_NO_OPENSSL)
+endif()
 
 # Qt-specific settings
 set_target_properties(sysmon_gui PROPERTIES

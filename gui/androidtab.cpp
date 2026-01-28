@@ -339,26 +339,16 @@ void AndroidTab::onAndroidDevicesResponse(const Response& response) {
         return;
     }
     
-    // If no devices from IPC, use placeholder data for development
+    // Display actual device count
+    deviceCountLabel_->setText(QString("Devices: %1").arg(devices.size()));
+    
+    // If no devices, show appropriate message
     if (devices.empty()) {
-        AndroidDeviceInfo device;
-        device.model = "Example Phone";
-        device.androidVersion = "11";
-        device.serialNumber = "device1";
-        device.batteryLevel = 85;
-        device.isScreenOn = true;
-        device.isLocked = false;
-        device.foregroundApp = "com.example.app";
-        devices.push_back(device);
-        
-        device.model = "Another Phone";
-        device.androidVersion = "12";
-        device.serialNumber = "device2";
-        device.batteryLevel = 45;
-        device.isScreenOn = false;
-        device.isLocked = true;
-        device.foregroundApp = "com.launcher";
-        devices.push_back(device);
+        deviceListWidget_->clear();
+        QListWidgetItem* noDeviceItem = new QListWidgetItem("No Android devices connected");
+        noDeviceItem->setForeground(Qt::gray);
+        deviceListWidget_->addItem(noDeviceItem);
+        return;
     }
     
     currentDevices_ = devices;
@@ -410,17 +400,14 @@ void AndroidTab::onDeviceInfoResponse(const Response& response) {
         }
     } catch (const std::exception& e) {
         onError(QString("Failed to parse device info: %1").arg(e.what()));
+        return;
     }
     
-    // Fallback to placeholder data
-    AndroidDeviceInfo device;
-    device.model = "Example Phone";
-    device.androidVersion = "11";
-    device.serialNumber = "device1";
-    device.batteryLevel = 85;
-    device.isScreenOn = true;
-    device.isLocked = false;
-    device.foregroundApp = "com.example.app";
+    // If no device info received, show error
+    if (response.data.empty()) {
+        onError("No device information available");
+        return;
+    }
     
     currentDeviceInfo_ = device;
     updateDeviceInfo(device);
@@ -457,11 +444,14 @@ void AndroidTab::onAppListResponse(const Response& response) {
         return;
     }
     
-    // If no apps from IPC, use placeholder data for development
+    // If no apps, show appropriate message
     if (apps.empty()) {
-        apps.push_back("com.example.app1");
-        apps.push_back("com.example.app2");
-        apps.push_back("com.android.settings");
+        appListWidget_->clear();
+        QListWidgetItem* noAppsItem = new QListWidgetItem("No apps found on device");
+        noAppsItem->setForeground(Qt::gray);
+        appListWidget_->addItem(noAppsItem);
+        currentApps_.clear();
+        return;
     }
     
     currentApps_ = apps;
@@ -555,11 +545,12 @@ void AndroidTab::onLogcatResponse(const Response& response) {
         return;
     }
     
-    // If no logcat from IPC, use placeholder data for development
+    // If no logcat, show appropriate message
     if (logcat.empty()) {
-        logcat.push_back("Log line 1");
-        logcat.push_back("Log line 2");
-        logcat.push_back("Log line 3");
+        logcatTextEdit_->clear();
+        logcatTextEdit_->append("No log data available from device");
+        logcatTextEdit_->append("Make sure the device is connected and ADB debugging is enabled");
+        return;
     }
     
     showLogcat(logcat);
@@ -919,5 +910,3 @@ QString AndroidTab::formatBool(bool value) const {
 }
 
 } // namespace SysMon
-
-#include "androidtab.moc"

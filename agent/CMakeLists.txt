@@ -76,6 +76,11 @@ target_compile_definitions(sysmon_agent
     SYSMON_AGENT_EXPORTS
 )
 
+# Add SYSMON_NO_OPENSSL definition if needed
+if(SYSMON_NO_OPENSSL)
+    target_compile_definitions(sysmon_agent PRIVATE SYSMON_NO_OPENSSL)
+endif()
+
 # Installation
 install(TARGETS sysmon_agent
     RUNTIME DESTINATION bin

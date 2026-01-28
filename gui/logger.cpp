@@ -183,5 +183,3 @@ void GuiLogger::clearLogWidget() {
 }
 
 } // namespace SysMon
-
-#include "logger.moc"

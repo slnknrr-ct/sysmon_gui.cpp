@@ -207,26 +207,159 @@ bool IpcProtocol::hasError() {
     return !lastError_.empty();
 }
 
-// Simple JSON parsing (basic implementation)
+// Robust JSON parsing with validation
 bool IpcProtocol::parseJson(const std::string& json, std::map<std::string, std::string>& result) {
     lastError_.clear();
+    result.clear();
     
-    // Very simple JSON parser - just extracts key: value pairs
-    // This is a basic implementation for MVP
-    std::regex keyValueRegex(R"(\"([^\"]+)\"\s*:\s*\"([^\"]*)\")");
-    std::sregex_iterator iter(json.begin(), json.end(), keyValueRegex);
-    std::sregex_iterator end;
-    
-    for (; iter != end; ++iter) {
-        std::smatch match = *iter;
-        result[match[1].str()] = match[2].str();
+    // Size validation - prevent DoS
+    if (json.empty() || json.size() > MAX_MESSAGE_SIZE) {
+        lastError_ = "JSON size out of bounds (0 < size <= " + std::to_string(MAX_MESSAGE_SIZE) + ")";
+        return false;
     }
     
-    return !result.empty();
+    // Basic JSON structure validation
+    if (json.front() != '{' || json.back() != '}') {
+        lastError_ = "Invalid JSON structure - must start with { and end with }";
+        return false;
+    }
+    
+    // Check for balanced braces
+    int braceCount = 0;
+    bool inString = false;
+    bool escaped = false;
+    
+    for (size_t i = 0; i < json.size(); ++i) {
+        char c = json[i];
+        
+        if (escaped) {
+            escaped = false;
+            continue;
+        }
+        
+        if (c == '\\') {
+            escaped = true;
+            continue;
+        }
+        
+        if (c == '"') {
+            inString = !inString;
+            continue;
+        }
+        
+        if (!inString) {
+            if (c == '{') braceCount++;
+            else if (c == '}') braceCount--;
+            
+            if (braceCount < 0) {
+                lastError_ = "Unbalanced braces in JSON";
+                return false;
+            }
+        }
+    }
+    
+    if (braceCount != 0) {
+        lastError_ = "Unbalanced braces in JSON";
+        return false;
+    }
+    
+    if (inString) {
+        lastError_ = "Unterminated string in JSON";
+        return false;
+    }
+    
+    // Extract key-value pairs with proper parsing
+    std::string content = json.substr(1, json.length() - 2); // Remove { }
+    
+    // Remove whitespace
+    content.erase(std::remove_if(content.begin(), content.end(), ::isspace), content.end());
+    
+    if (content.empty()) {
+        lastError_ = "Empty JSON object";
+        return false;
+    }
+    
+    // Parse key-value pairs
+    size_t pos = 0;
+    while (pos < content.length()) {
+        // Find key start
+        if (content[pos] != '"') {
+            lastError_ = "Expected key starting with quote at position " + std::to_string(pos);
+            return false;
+        }
+        pos++;
+        
+        // Find key end
+        size_t keyEnd = content.find('"', pos);
+        if (keyEnd == std::string::npos) {
+            lastError_ = "Unterminated key string";
+            return false;
+        }
+        
+        std::string key = content.substr(pos, keyEnd - pos);
+        pos = keyEnd + 1;
+        
+        // Skip whitespace and find colon
+        while (pos < content.length() && content[pos] == ' ') pos++;
+        if (pos >= content.length() || content[pos] != ':') {
+            lastError_ = "Expected ':' after key '" + key + "'";
+            return false;
+        }
+        pos++;
+        
+        // Skip whitespace and find value start
+        while (pos < content.length() && content[pos] == ' ') pos++;
+        if (pos >= content.length()) {
+            lastError_ = "Expected value after ':' for key '" + key + "'";
+            return false;
+        }
+        
+        // Parse value (must be quoted string)
+        if (content[pos] != '"') {
+            lastError_ = "Value must be quoted string for key '" + key + "'";
+            return false;
+        }
+        pos++;
+        
+        size_t valueEnd = content.find('"', pos);
+        if (valueEnd == std::string::npos) {
+            lastError_ = "Unterminated value string for key '" + key + "'";
+            return false;
+        }
+        
+        std::string value = content.substr(pos, valueEnd - pos);
+        pos = valueEnd + 1;
+        
+        // Store pair
+        result[key] = value;
+        
+        // Skip comma if present
+        while (pos < content.length() && content[pos] == ' ') pos++;
+        if (pos < content.length() && content[pos] == ',') {
+            pos++;
+            continue;
+        }
+        
+        // Should be at end now
+        break;
+    }
+    
+    if (result.empty()) {
+        lastError_ = "No valid key-value pairs found";
+        return false;
+    }
+    
+    return true;
 }
 
-// Create JSON from map
+// Create JSON from map with proper escaping
 std::string IpcProtocol::createJson(const std::map<std::string, std::string>& data) {
+    // Validate field count
+    if (data.size() > MAX_FIELD_COUNT) {
+        lastError_ = "Too many fields in JSON object (max " + std::to_string(MAX_FIELD_COUNT) + ")";
+        return "{}";
+    }
+    
     std::ostringstream oss;
     oss << "{";
     
@@ -235,12 +368,62 @@ std::string IpcProtocol::createJson(const std::map<std::string, std::string>& da
         if (!first) {
             oss << ",";
         }
-        oss << "\"" << pair.first << "\":\"" << pair.second << "\"";
+        
+        // Escape key
+        oss << "\"" << escapeJsonString(pair.first) << "\":\"";
+        
+        // Escape value
+        oss << escapeJsonString(pair.second) << "\"";
+        
         first = false;
+        
+        // Check size limit during construction
+        if (oss.tellp() > static_cast<std::streampos>(MAX_MESSAGE_SIZE)) {
+            lastError_ = "JSON size exceeded during construction";
+            return "{}";
+        }
     }
     
     oss << "}";
-    return oss.str();
+    
+    std::string result = oss.str();
+    if (result.size() > MAX_MESSAGE_SIZE) {
+        lastError_ = "Final JSON size exceeds limit";
+        return "{}";
+    }
+    
+    return result;
+}
+
+// Escape JSON string - prevent injection
+std::string IpcProtocol::escapeJsonString(const std::string& input) {
+    std::string escaped;
+    escaped.reserve(input.length() * 2); // Reserve space for worst case
+    
+    for (char c : input) {
+        switch (c) {
+            case '"': escaped += "\\\""; break;
+            case '\\': escaped += "\\\\"; break;
+            case '\b': escaped += "\\b"; break;
+            case '\f': escaped += "\\f"; break;
+            case '\n': escaped += "\\n"; break;
+            case '\r': escaped += "\\r"; break;
+            case '\t': escaped += "\\t"; break;
+            default:
+                if (c >= 0 && c < 32) {
+                    // Control characters
+                    escaped += "\\u";
+                    char hex[5];
+                    snprintf(hex, sizeof(hex), "%04x", static_cast<unsigned char>(c));
+                    escaped += hex;
+                } else {
+                    escaped += c;
+                }
+                break;
+        }
+    }
+    
+    return escaped;
 }
 
 // IpcMessage implementations

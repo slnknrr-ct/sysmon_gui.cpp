@@ -3,11 +3,15 @@
 #include "../shared/systemtypes.h"
 #include "../shared/commands.h"
 #include "../shared/ipcprotocol.h"
+#include "../shared/serializer.h"
+#include "../shared/security.h"
+#include "../shared/logger.h"
 #include <memory>
 #include <thread>
 #include <atomic>
 #include <vector>
 #include <shared_mutex>
+#include <mutex>
 
 namespace SysMon {
 
@@ -42,13 +46,28 @@ public:
     void handleEvent(const Event& event);
     void sendEventToClients(const Event& event);
     
-    // Component access (for automation engine)
-    SystemMonitor* getSystemMonitor() const { return systemMonitor_.get(); }
-    DeviceManager* getDeviceManager() const { return deviceManager_.get(); }
-    NetworkManager* getNetworkManager() const { return networkManager_.get(); }
-    ProcessManager* getProcessManager() const { return processManager_.get(); }
-    AndroidManager* getAndroidManager() const { return androidManager_.get(); }
-    Logger* getLogger() const { return logger_.get(); }
+    // Component access interface (encapsulated)
+    bool getSystemInfo(SystemInfo& info) const;
+    std::vector<ProcessInfo> getProcessList() const;
+    std::vector<UsbDevice> getUsbDevices() const;
+    std::vector<NetworkInterface> getNetworkInterfaces() const;
+    std::vector<AndroidDeviceInfo> getAndroidDevices() const;
+    std::vector<AutomationRule> getAutomationRules() const;
+    
+    // Component control interface
+    bool terminateProcess(uint32_t pid);
+    bool enableUsbDevice(const std::string& vidPid);
+    bool disableUsbDevice(const std::string& vidPid);
+    bool enableNetworkInterface(const std::string& name);
+    bool disableNetworkInterface(const std::string& name);
+    bool androidScreenOn(const std::string& serial);
+    bool androidScreenOff(const std::string& serial);
+    bool androidLockDevice(const std::string& serial);
+    std::string androidTakeScreenshot(const std::string& serial);
+    bool addAutomationRule(const AutomationRule& rule);
+    bool removeAutomationRule(const std::string& ruleId);
+    bool enableAutomationRule(const std::string& ruleId);
+    bool disableAutomationRule(const std::string& ruleId);
 
 private:
     // Component initialization
@@ -74,6 +93,14 @@ private:
     std::atomic<bool> running_;
     std::atomic<bool> initialized_;
     
+    // Thread safety
+    mutable std::shared_mutex componentsMutex_;
+    mutable std::mutex commandMutex_;
+    
+    // Serialization
+    Serialization::Serializer* serializer_;
+    Security::SecurityManager* securityManager_;
+    
     // Command processing
     void processCommand(const Command& command);
     Response handleCommand(const Command& command);
@@ -87,16 +114,10 @@ private:
     Response handleAutomationCommand(const Command& command);
     Response handleGenericCommand(const Command& command);
     
-    // Helper methods
-    std::string serializeSystemInfo(const SystemInfo& info);
-    std::string serializeProcessList(const std::vector<ProcessInfo>& processes);
-    std::string serializeDeviceList(const std::vector<UsbDevice>& devices);
-    std::string serializeNetworkInterfaces(const std::vector<NetworkInterface>& interfaces);
-    std::string serializeAndroidDevices(const std::vector<AndroidDeviceInfo>& devices);
-    std::string serializeAutomationRules(const std::vector<AutomationRule>& rules);
-    
-    // Data validation
+    // Helper methods - removed serialize methods (now using Serializer)
     bool validateParameters(const Command& command, const std::vector<std::string>& requiredParams);
+    void logCommand(const Command& command, const std::string& status);
+    void logError(const std::string& function, const std::exception& e);
 };
 
 } // namespace SysMon

@@ -2,6 +2,7 @@
 
 #include "../shared/commands.h"
 #include "../shared/ipcprotocol.h"
+#include "../shared/security.h"
 #include <QObject>
 #include <QTcpSocket>
 #include <QTimer>
@@ -30,13 +31,17 @@ public:
     ~IpcClient();
     
     // Connection management
-    bool connectToAgent(const QString& host = "localhost", int port = 12345);
+    bool connectToAgent(const std::string& host = "localhost", int port = 12345);
     void disconnectFromAgent();
     bool isConnected() const;
     
+    // Authentication
+    void authenticate();
+    bool isAuthenticated() const;
+    
     // Command sending
-    QString sendCommand(const Command& command, ResponseHandler handler = nullptr);
-    QString sendCommandAsync(const Command& command, ResponseHandler handler = nullptr);
+    std::string sendCommand(const Command& command, ResponseHandler handler = nullptr);
+    std::string sendCommandAsync(const Command& command, ResponseHandler handler = nullptr);
     
     // Handler registration
     void setDefaultResponseHandler(ResponseHandler handler);
@@ -44,15 +49,18 @@ public:
     void setConnectionHandler(ConnectionHandler handler);
     
     // Status
-    QString getConnectionStatus() const;
-    QString getLastError() const;
+    std::string getConnectionStatus() const;
+    std::string getLastError() const;
 
 signals:
     void connected();
     void disconnected();
-    void errorOccurred(const QString& error);
+    void errorOccurred(const std::string& error);
     void responseReceived(const Response& response);
     void eventReceived(const Event& event);
+    void authenticationRequired();
+    void authenticationSuccess();
+    void authenticationFailed(const std::string& reason);
 
 private slots:
     // Socket event handlers
@@ -71,29 +79,42 @@ private:
     void sendCommandToSocket(const Command& command);
     void handlePendingCommands();
     
+    // Authentication
+    void sendAuthenticationRequest();
+    void handleAuthenticationResponse(const Response& response);
+    
     // Response handling
     void handleResponse(const Response& response);
     void handleEvent(const Event& event);
     
     // Pending command tracking
     struct PendingCommand {
-        QString id;
+        std::string id;
         Command command;
         ResponseHandler handler;
         std::chrono::system_clock::time_point timestamp;
     };
     
     std::queue<PendingCommand> pendingCommands_;
-    std::map<QString, PendingCommand> activeCommands_;
+    std::map<std::string, PendingCommand> activeCommands_;
     mutable std::mutex commandsMutex_;
     
     // Network components
     std::unique_ptr<QTcpSocket> socket_;
-    QString host_;
+    std::string host_;
     int port_;
     
+    // Authentication
+    bool authenticated_;
+    std::string authToken_;
+    Security::SecurityManager* securityManager_;
+    
+    // Timers
+    QTimer* connectionTimer_;
+    QTimer* authTimer_;
+    QTimer* heartbeatTimer_;
+    
     // Connection management
-    std::unique_ptr<QTimer> connectionTimer_;
     bool reconnecting_;
     int reconnectAttempts_;
     
@@ -106,11 +127,12 @@ private:
     ConnectionHandler connectionHandler_;
     
     // Status
+    std::string lastError_;
+    mutable std::mutex statusMutex_;
     std::atomic<bool> connected_;
-    QString lastError_;
     
     // Command ID generation
-    QString generateCommandId();
+    std::string generateCommandId();
     std::atomic<uint64_t> commandCounter_;
     
     // Constants
@@ -118,6 +140,9 @@ private:
     static constexpr int RECONNECT_INTERVAL = 3000; // 3 seconds
     static constexpr int MAX_RECONNECT_ATTEMPTS = 10;
     static constexpr int COMMAND_TIMEOUT = 10000; // 10 seconds
+    static constexpr int RECONNECT_DELAY = 2000; // 2 seconds
+    static constexpr int HEARTBEAT_INTERVAL = 30000; // 30 seconds
+    static constexpr int AUTH_TIMEOUT = 10000; // 10 seconds
 };
 
 } // namespace SysMon

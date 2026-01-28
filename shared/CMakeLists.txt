@@ -4,12 +4,18 @@ set(SHARED_SOURCES
     systemtypes.cpp
     commands.cpp
     ipcprotocol.cpp
+    security.cpp
+    serializer.cpp
+    logger.cpp
 )
 
 set(SHARED_HEADERS
     systemtypes.h
     commands.h
     ipcprotocol.h
+    security.h
+    serializer.h
+    logger.h
 )
 
 # Create shared library
@@ -25,8 +31,14 @@ target_include_directories(sysmon_shared
 # Link with system libraries
 if(WIN32)
     target_link_libraries(sysmon_shared ws2_32)
+    if(NOT SYSMON_NO_OPENSSL)
+        target_link_libraries(sysmon_shared OpenSSL::SSL OpenSSL::Crypto)
+    endif()
 else()
     target_link_libraries(sysmon_shared pthread)
+    if(NOT SYSMON_NO_OPENSSL)
+        target_link_libraries(sysmon_shared OpenSSL::SSL OpenSSL::Crypto)
+    endif()
 endif()
 
 # Set compile definitions
@@ -34,6 +46,11 @@ target_compile_definitions(sysmon_shared
     PRIVATE
     SYSMON_SHARED_EXPORTS
 )
+
+# Add SYSMON_NO_OPENSSL definition if needed
+if(SYSMON_NO_OPENSSL)
+    target_compile_definitions(sysmon_shared PRIVATE SYSMON_NO_OPENSSL)
+endif()
 
 # Export library for other components
 set_target_properties(sysmon_shared PROPERTIES

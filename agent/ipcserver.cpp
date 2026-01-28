@@ -5,6 +5,8 @@
 #include <chrono>
 #include <algorithm>
 #include <sstream>
+#include <future>
+#include <atomic>
 
 #ifdef _WIN32
 #include <winsock2.h>
@@ -22,9 +24,11 @@ namespace SysMon {
 
 IpcServer::IpcServer() 
     : serverSocket_(-1)
-    , port_(12345)
+    , port_(Constants::DEFAULT_IPC_PORT)
     , running_(false)
-    , initialized_(false) {
+    , initialized_(false)
+    , shuttingDown_(false)
+    , securityManager_(&Security::SecurityManager::getInstance()) {
     
 #ifdef _WIN32
     WSADATA wsaData;
@@ -46,6 +50,10 @@ bool IpcServer::initialize(int port) {
     }
     
     port_ = port;
+    
+    // Configure security manager
+    securityManager_->setMaxMessageSize(Constants::MAX_MESSAGE_SIZE);
+    securityManager_->setRateLimit(Constants::MAX_REQUESTS_PER_MINUTE, Constants::RATE_LIMIT_WINDOW);
     
     if (!createServerSocket(port)) {
         return false;
@@ -76,19 +84,23 @@ void IpcServer::stop() {
     }
     
     if (logger_) {
-        logger_->info("Stopping IPC server...");
+        logger_->info("Starting graceful shutdown of IPC server...");
     }
     
+    // Signal shutdown to all threads
+    shuttingDown_ = true;
     running_ = false;
     
-    // Wait for server thread
-    if (serverThread_.joinable()) {
-        serverThread_.join();
-    }
+    // Close server socket first to stop accepting new connections
+    closeServerSocket();
     
-    // Close all client connections
+    // Close all client sockets to unblock recv() calls
     {
         std::lock_guard<std::mutex> lock(clientsMutex_);
+        if (logger_) {
+            logger_->info("Closing " + std::to_string(clientSockets_.size()) + " client connections...");
+        }
+        
         for (auto& client : clientSockets_) {
 #ifdef _WIN32
             closesocket(client.second);
@@ -100,16 +112,67 @@ void IpcServer::stop() {
         clientSockets_.clear();
     }
     
-    // Wait for all client threads
+    // Wait for client threads to finish with timeout
+    if (logger_) {
+        logger_->info("Waiting for client threads to finish...");
+    }
+    
+    auto startTime = std::chrono::steady_clock::now();
     for (auto& thread : clientThreads_) {
         if (thread.joinable()) {
-            thread.join();
+            // Check remaining timeout
+            auto elapsed = std::chrono::steady_clock::now() - startTime;
+            auto remaining = SHUTDOWN_TIMEOUT - elapsed;
+            
+            if (remaining.count() > 0) {
+                // Wait with timeout using future
+                auto future = std::async(std::launch::async, [&thread]() {
+                    thread.join();
+                });
+                
+                if (future.wait_for(remaining) == std::future_status::timeout) {
+                    if (logger_) {
+                        logger_->warning("Client thread did not finish within timeout, forcing continuation");
+                    }
+                    // Thread is stuck, but we continue with shutdown
+                    break;
+                }
+            } else {
+                if (logger_) {
+                    logger_->warning("Shutdown timeout exceeded, forcing continuation");
+                }
+                break;
+            }
         }
     }
+    
+    // Clear client threads vector
     clientThreads_.clear();
     
+    // Wait for server thread
+    if (serverThread_.joinable()) {
+        if (logger_) {
+            logger_->info("Waiting for server thread to finish...");
+        }
+        
+        auto elapsed = std::chrono::steady_clock::now() - startTime;
+        auto remaining = SHUTDOWN_TIMEOUT - elapsed;
+        
+        if (remaining.count() > 0) {
+            auto future = std::async(std::launch::async, [this]() {
+                serverThread_.join();
+            });
+            
+            if (future.wait_for(remaining) == std::future_status::timeout) {
+                if (logger_) {
+                    logger_->warning("Server thread did not finish within timeout");
+                }
+            }
+        }
+    }
+    
     if (logger_) {
-        logger_->info("IPC server stopped");
+        logger_->info("IPC server graceful shutdown completed");
     }
 }
 
@@ -181,7 +244,7 @@ void IpcServer::serverThread() {
         logger_->info("IPC server thread started");
     }
     
-    while (running_) {
+    while (running_ && !shuttingDown_) {
         try {
             acceptConnections();
             cleanupInactiveClients();
@@ -190,7 +253,11 @@ void IpcServer::serverThread() {
             if (logger_) {
                 logger_->error("Exception in server thread: " + std::string(e.what()));
             }
-            std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+            
+            // Don't sleep too long if we're shutting down
+            if (!shuttingDown_) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+            }
         }
     }
     
@@ -200,7 +267,7 @@ void IpcServer::serverThread() {
 }
 
 void IpcServer::acceptConnections() {
-    if (serverSocket_ == -1) {
+    if (serverSocket_ == -1 || shuttingDown_) {
         return;
     }
     
@@ -232,7 +299,7 @@ void IpcServer::acceptConnections() {
     // Check client limit
     {
         std::lock_guard<std::mutex> lock(clientsMutex_);
-        if (clients_.size() >= MAX_CLIENTS) {
+        if (clients_.size() >= Constants::MAX_CLIENTS) {
             if (logger_) {
                 logger_->warning("Client limit reached, rejecting connection");
             }
@@ -269,10 +336,19 @@ void IpcServer::handleClient(const std::string& clientId, int socket) {
     }
     
     try {
-        while (running_) {
+        while (running_ && !shuttingDown_) {
             std::string message = receiveMessage(socket);
             if (message.empty()) {
-                break; // Client disconnected
+                if (shuttingDown_) {
+                    if (logger_) {
+                        logger_->info("Client handler " + clientId + " exiting due to shutdown");
+                    }
+                } else {
+                    if (logger_) {
+                        logger_->info("Client " + clientId + " disconnected");
+                    }
+                }
+                break; // Client disconnected or shutting down
             }
             
             processClientMessage(clientId, message);
@@ -283,16 +359,20 @@ void IpcServer::handleClient(const std::string& clientId, int socket) {
         }
     }
     
+    // Remove client from tracking
     removeClient(clientId);
     
+    // Close socket if not already closed
+    if (socket >= 0) {
 #ifdef _WIN32
-    closesocket(socket);
+        closesocket(socket);
 #else
-    close(socket);
+        close(socket);
 #endif
+    }
     
     if (logger_) {
-        logger_->info("Client handler stopped for ID: " + clientId);
+        logger_->info("Client handler for ID: " + clientId + " finished");
     }
 }
 
@@ -305,6 +385,34 @@ void IpcServer::processClientMessage(const std::string& clientId, const std::str
             if (it != clients_.end()) {
                 it->second.lastActivity = std::chrono::system_clock::now();
             }
+        }
+        
+        // Validate message size and format
+        if (!securityManager_->validateCommand(message)) {
+            if (logger_) {
+                logger_->warning("Invalid message format or size from client " + clientId);
+            }
+            Response errorResponse = createResponse("invalid", CommandStatus::FAILED, 
+                "Invalid message format or size");
+            sendResponseToClient(clientId, errorResponse);
+            return;
+        }
+        
+        // Check rate limiting
+        if (isRateLimited(clientId)) {
+            if (logger_) {
+                logger_->warning("Rate limit exceeded for client " + clientId);
+            }
+            Response errorResponse = createResponse("rate_limited", CommandStatus::FAILED, 
+                "Rate limit exceeded");
+            sendResponseToClient(clientId, errorResponse);
+            return;
+        }
+        
+        // Check authentication
+        if (!isClientAuthenticated(clientId)) {
+            handleAuthentication(clientId, message);
+            return;
         }
         
         auto messageType = IpcProtocol::getMessageType(message);
@@ -345,6 +453,96 @@ void IpcServer::processClientMessage(const std::string& clientId, const std::str
     }
 }
 
+bool IpcServer::authenticateClient(const std::string& clientId, const std::string& token) {
+    return securityManager_->authenticateClient(clientId, token);
+}
+
+bool IpcServer::isClientAuthenticated(const std::string& clientId) {
+    std::lock_guard<std::mutex> lock(clientsMutex_);
+    auto it = clients_.find(clientId);
+    return it != clients_.end() && it->second.isAuthenticated;
+}
+
+bool IpcServer::isRateLimited(const std::string& clientId) {
+    return securityManager_->isRateLimited(clientId);
+}
+
+void IpcServer::handleAuthentication(const std::string& clientId, const std::string& message) {
+    try {
+        // Try to parse as authentication request
+        auto messageType = IpcProtocol::getMessageType(message);
+        
+        if (messageType == IpcProtocol::MessageType::COMMAND) {
+            Command command = IpcProtocol::deserializeCommand(message);
+            
+            // Check if this is an authentication command
+            if (command.type == CommandType::PING && command.parameters.find("auth_token") != command.parameters.end()) {
+                std::string token = command.parameters.at("auth_token");
+                
+                std::lock_guard<std::mutex> lock(clientsMutex_);
+                auto it = clients_.find(clientId);
+                if (it != clients_.end()) {
+                    auto& client = it->second;
+                    
+                    // Check if client is locked out
+                    auto now = std::chrono::system_clock::now();
+                    if (client.lockoutUntil > now) {
+                        Response errorResponse = createResponse(command.id, CommandStatus::FAILED, 
+                            "Account locked out. Try again later.");
+                        sendResponseToClient(clientId, errorResponse);
+                        return;
+                    }
+                    
+                    if (authenticateClient(clientId, token)) {
+                        client.isAuthenticated = true;
+                        client.failedAuthAttempts = 0;
+                        
+                        if (logger_) {
+                            logger_->info("Client " + clientId + " authenticated successfully");
+                        }
+                        
+                        Response successResponse = createResponse(command.id, CommandStatus::SUCCESS, 
+                            "Authentication successful");
+                        sendResponseToClient(clientId, successResponse);
+                    } else {
+                        client.failedAuthAttempts++;
+                        
+                        if (client.failedAuthAttempts >= Constants::MAX_LOGIN_ATTEMPTS) {
+                            client.lockoutUntil = now + Constants::LOCKOUT_DURATION;
+                            
+                            if (logger_) {
+                                logger_->warning("Client " + clientId + " locked out due to too many failed attempts");
+                            }
+                            
+                            Response errorResponse = createResponse(command.id, CommandStatus::FAILED, 
+                                "Account locked out due to too many failed attempts");
+                            sendResponseToClient(clientId, errorResponse);
+                        } else {
+                            Response errorResponse = createResponse(command.id, CommandStatus::FAILED, 
+                                "Invalid authentication token");
+                            sendResponseToClient(clientId, errorResponse);
+                        }
+                    }
+                }
+            } else {
+                // Client is not authenticated and this is not an auth request
+                Response errorResponse = createResponse("auth_required", CommandStatus::FAILED, 
+                    "Authentication required");
+                sendResponseToClient(clientId, errorResponse);
+            }
+        } else {
+            // Invalid message type for unauthenticated client
+            Response errorResponse = createResponse("auth_required", CommandStatus::FAILED, 
+                "Authentication required");
+            sendResponseToClient(clientId, errorResponse);
+        }
+    } catch (const std::exception& e) {
+        Response errorResponse = createResponse("auth_error", CommandStatus::FAILED, 
+            "Authentication error: " + std::string(e.what()));
+        sendResponseToClient(clientId, errorResponse);
+    }
+}
+
 void IpcServer::addClient(int socket, const std::string& address) {
     std::lock_guard<std::mutex> lock(clientsMutex_);
     
@@ -353,13 +551,15 @@ void IpcServer::addClient(int socket, const std::string& address) {
     client.address = address;
     client.connectTime = std::chrono::system_clock::now();
     client.lastActivity = client.connectTime;
+    client.authToken = securityManager_->generateClientToken();
     
     clients_[client.id] = client;
     clientSockets_[client.id] = socket;
     
     // Log new connection
     if (logger_) {
-        logger_->info("New client connected from " + address + " with ID: " + client.id);
+        logger_->info("New client connected from " + address + " with ID: " + client.id + 
+                     " (token: " + client.authToken.substr(0, 8) + "...)");
     }
 }
 
@@ -373,6 +573,9 @@ void IpcServer::removeClient(const std::string& clientId) {
     
     clients_.erase(clientId);
     clientSockets_.erase(clientId);
+    
+    // Remove from security manager
+    securityManager_->removeClient(clientId);
 }
 
 bool IpcServer::createServerSocket(int port) {
@@ -449,6 +652,14 @@ bool IpcServer::sendMessage(int socket, const std::string& message) {
         return false;
     }
     
+    // Validate message size
+    if (message.size() > Constants::MAX_MESSAGE_SIZE) {
+        if (logger_) {
+            logger_->error("Message too large to send: " + std::to_string(message.size()) + " bytes (max: " + std::to_string(Constants::MAX_MESSAGE_SIZE) + ")");
+        }
+        return false;
+    }
+    
     // Send message length first
     uint32_t msgLength = static_cast<uint32_t>(message.length());
     uint32_t sent = 0;
@@ -456,6 +667,9 @@ bool IpcServer::sendMessage(int socket, const std::string& message) {
     while (sent < sizeof(msgLength)) {
         int result = send(socket, (const char*)&msgLength + sent, sizeof(msgLength) - sent, 0);
         if (result <= 0) {
+            if (logger_) {
+                logger_->error("Failed to send message length to socket " + std::to_string(socket));
+            }
             return false;
         }
         sent += result;
@@ -466,6 +680,9 @@ bool IpcServer::sendMessage(int socket, const std::string& message) {
     while (sent < msgLength) {
         int result = send(socket, message.c_str() + sent, msgLength - sent, 0);
         if (result <= 0) {
+            if (logger_) {
+                logger_->error("Failed to send message content to socket " + std::to_string(socket));
+            }
             return false;
         }
         sent += result;
@@ -475,6 +692,45 @@ bool IpcServer::sendMessage(int socket, const std::string& message) {
 }
 std::string IpcServer::receiveMessage(int socket) {
     if (socket < 0) {
+        if (logger_) {
+            logger_->error("Invalid socket for receiveMessage");
+        }
+        return "";
+    }
+    
+    // Check if we're shutting down
+    if (shuttingDown_) {
+        return "";
+    }
+    
+    // Use select for timeout-based receive
+    fd_set read_fds;
+    FD_ZERO(&read_fds);
+    FD_SET(socket, &read_fds);
+    
+    struct timeval timeout;
+    timeout.tv_sec = 1; // 1 second timeout
+    timeout.tv_usec = 0;
+    
+    int selectResult = select(socket + 1, &read_fds, nullptr, nullptr, &timeout);
+    if (selectResult <= 0) {
+        if (selectResult == 0) {
+            // Timeout - check if we should continue
+            return shuttingDown_ ? "" : "";
+        } else {
+            if (logger_) {
+                logger_->error("Select failed on socket " + std::to_string(socket));
+            }
+            return "";
+        }
+    }
+    
+    if (!FD_ISSET(socket, &read_fds)) {
+        return "";
+    }
+    
+    // Check shutdown flag again after select
+    if (shuttingDown_) {
         return "";
     }
     
@@ -482,27 +738,84 @@ std::string IpcServer::receiveMessage(int socket) {
     uint32_t msgLength;
     int received = recv(socket, (char*)&msgLength, sizeof(msgLength), 0);
     if (received != sizeof(msgLength)) {
-        return "";
-    }
-    
-    // Validate message length
-    if (msgLength > 1024 * 1024) { // 1MB limit
-        if (logger_) {
-            logger_->warning("Received message too large: " + std::to_string(msgLength) + " bytes");
+        if (received == 0) {
+            if (logger_) {
+                logger_->info("Client disconnected gracefully (socket " + std::to_string(socket) + ")");
+            }
+        } else {
+            if (logger_) {
+                logger_->error("Failed to receive message length from socket " + std::to_string(socket) + ": " + std::to_string(received) + " bytes");
+            }
         }
         return "";
     }
     
-    // Receive message
+    // Validate message length against our limit
+    if (msgLength > Constants::MAX_MESSAGE_SIZE) {
+        if (logger_) {
+            logger_->warning("Received message too large: " + std::to_string(msgLength) + " bytes (max: " + std::to_string(Constants::MAX_MESSAGE_SIZE) + ")");
+        }
+        return "";
+    }
+    
+    // Validate minimum message length
+    if (msgLength < 2) { // At least "{}"
+        if (logger_) {
+            logger_->warning("Received message too small: " + std::to_string(msgLength) + " bytes");
+        }
+        return "";
+    }
+    
+    // Receive message with timeout protection
     std::string message(msgLength, '\0');
     uint32_t totalReceived = 0;
     
-    while (totalReceived < msgLength) {
+    while (totalReceived < msgLength && !shuttingDown_) {
+        // Use select for timeout on each receive
+        FD_ZERO(&read_fds);
+        FD_SET(socket, &read_fds);
+        timeout.tv_sec = 1;
+        timeout.tv_usec = 0;
+        
+        selectResult = select(socket + 1, &read_fds, nullptr, nullptr, &timeout);
+        if (selectResult <= 0) {
+            if (selectResult == 0) {
+                // Timeout - continue if not shutting down
+                continue;
+            } else {
+                if (logger_) {
+                    logger_->error("Select failed during message receive from socket " + std::to_string(socket));
+                }
+                return "";
+            }
+        }
+        
+        if (!FD_ISSET(socket, &read_fds)) {
+            continue;
+        }
+        
         int result = recv(socket, &message[totalReceived], msgLength - totalReceived, 0);
         if (result <= 0) {
+            if (result == 0) {
+                if (logger_) {
+                    logger_->warning("Client disconnected during message receive (socket " + std::to_string(socket) + ")");
+                }
+            } else {
+                if (logger_) {
+                    logger_->error("Failed to receive message content from socket " + std::to_string(socket) + ": " + std::to_string(result));
+                }
+            }
             return "";
         }
         totalReceived += result;
+    }
+    
+    if (shuttingDown_) {
+        return "";
+    }
+    
+    if (logger_) {
+        logger_->info("Received message of " + std::to_string(msgLength) + " bytes from socket " + std::to_string(socket));
     }
     
     return message;
@@ -516,7 +829,7 @@ void IpcServer::cleanupInactiveClients() {
     
     for (const auto& client : clients_) {
         auto duration = std::chrono::duration_cast<std::chrono::seconds>(now - client.second.lastActivity);
-        if (duration > CLIENT_TIMEOUT) {
+        if (duration > Constants::CLIENT_TIMEOUT) {
             toRemove.push_back(client.first);
         }
     }
@@ -533,10 +846,16 @@ void IpcServer::cleanupInactiveClients() {
         }
         clients_.erase(clientId);
         
+        // Remove from security manager
+        securityManager_->removeClient(clientId);
+        
         if (logger_) {
             logger_->info("Removed inactive client: " + clientId);
         }
     }
+    
+    // Cleanup security manager
+    securityManager_->cleanupInactiveClients();
 }
 
 } // namespace SysMon

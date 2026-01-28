@@ -18,8 +18,8 @@ int main(int argc, char *argv[]) {
     // Set application style
     app.setStyle(QStyleFactory::create("Fusion"));
     
-    // Set application icon (if available)
-    // app.setWindowIcon(QIcon(":/icons/app_icon.png"));
+    // Set application icon
+    app.setWindowIcon(QIcon("../sysmon.png"));
     
     qDebug() << "SysMon3 GUI starting...";
     

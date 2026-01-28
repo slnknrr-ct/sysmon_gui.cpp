@@ -1,11 +1,4 @@
 #include "mainwindow.h"
-#include "ipcclient.h"
-#include "systemmonitortab.h"
-#include "devicemanagertab.h"
-#include "networkmanagertab.h"
-#include "processmanagertab.h"
-#include "androidtab.h"
-#include "automationtab.h"
 #include <QApplication>
 #include <QMenuBar>
 #include <QStatusBar>
@@ -18,6 +11,7 @@
 #include <QMessageBox>
 #include <QCloseEvent>
 #include <QTimer>
+#include <QSettings>
 #include <QDateTime>
 #include <memory>
 
@@ -39,9 +33,9 @@ MainWindow::MainWindow(QWidget *parent)
     
     // Connect IPC client signals
     connect(ipcClient_.get(), &IpcClient::connected,
-            this, &MainWindow::onConnectionStatusChanged);
+            this, [this]() { onConnectionStatusChanged(true); });
     connect(ipcClient_.get(), &IpcClient::disconnected,
-            this, &MainWindow::onConnectionStatusChanged);
+            this, [this]() { onConnectionStatusChanged(false); });
     connect(ipcClient_.get(), &IpcClient::errorOccurred,
             this, &MainWindow::onErrorOccurred);
     
@@ -110,74 +104,12 @@ void MainWindow::onAboutApplication() {
     QMessageBox::about(this, "About SysMon3",
         "SysMon3 - Cross-platform System Monitor\n\n"
         "Version: 1.0.0\n"
-        "A comprehensive system monitoring and management tool\n"
-        "with Android device support.\n\n"
-        "© 2025 SysMon Team");
+        "A comprehensive system monitoring and management tool\n\n"
+        " 2025 SysMon Team");
 }
 
 void MainWindow::onSettings() {
-    // Implement settings dialog
-    QDialog settingsDialog(this);
-    settingsDialog.setWindowTitle("Settings");
-    settingsDialog.setModal(true);
-    settingsDialog.resize(500, 400);
-    
-    QVBoxLayout* layout = new QVBoxLayout(&settingsDialog);
-    
-    // Agent connection settings
-    QGroupBox* agentGroup = new QGroupBox("Agent Connection");
-    QVBoxLayout* agentLayout = new QVBoxLayout(agentGroup);
-    
-    QHBoxLayout* hostLayout = new QHBoxLayout();
-    hostLayout->addWidget(new QLabel("Host:"));
-    QLineEdit* hostEdit = new QLineEdit("localhost");
-    hostLayout->addWidget(hostEdit);
-    agentLayout->addLayout(hostLayout);
-    
-    QHBoxLayout* portLayout = new QHBoxLayout();
-    portLayout->addWidget(new QLabel("Port:"));
-    QLineEdit* portEdit = new QLineEdit("8080");
-    portLayout->addWidget(portEdit);
-    agentLayout->addLayout(portLayout);
-    
-    layout->addWidget(agentGroup);
-    
-    // Update interval settings
-    QGroupBox* updateGroup = new QGroupBox("Update Intervals");
-    QVBoxLayout* updateLayout = new QVBoxLayout(updateGroup);
-    
-    QHBoxLayout* systemIntervalLayout = new QHBoxLayout();
-    systemIntervalLayout->addWidget(new QLabel("System Info (ms):"));
-    QLineEdit* systemIntervalEdit = new QLineEdit("2000");
-    systemIntervalLayout->addWidget(systemIntervalEdit);
-    updateLayout->addLayout(systemIntervalLayout);
-    
-    QHBoxLayout* processIntervalLayout = new QHBoxLayout();
-    processIntervalLayout->addWidget(new QLabel("Process List (ms):"));
-    QLineEdit* processIntervalEdit = new QLineEdit("3000");
-    processIntervalLayout->addWidget(processIntervalEdit);
-    updateLayout->addLayout(processIntervalLayout);
-    
-    layout->addWidget(updateGroup);
-    
-    // Dialog buttons
-    QHBoxLayout* buttonLayout = new QHBoxLayout();
-    QPushButton* okButton = new QPushButton("OK");
-    QPushButton* cancelButton = new QPushButton("Cancel");
-    buttonLayout->addStretch();
-    buttonLayout->addWidget(okButton);
-    buttonLayout->addWidget(cancelButton);
-    layout->addLayout(buttonLayout);
-    
-    // Connect buttons
-    connect(okButton, &QPushButton::clicked, &settingsDialog, &QDialog::accept);
-    connect(cancelButton, &QPushButton::clicked, &settingsDialog, &QDialog::reject);
-    
-    if (settingsDialog.exec() == QDialog::Accepted) {
-        // Apply settings
-        // TODO: Save and apply the settings
-        statusBar()->showMessage("Settings applied", 3000);
-    }
+    QMessageBox::information(this, "Settings", "Settings dialog not implemented yet");
 }
 
 void MainWindow::onConnectionStatusChanged(bool connected) {
@@ -190,12 +122,12 @@ void MainWindow::onConnectionStatusChanged(bool connected) {
     }
 }
 
-void MainWindow::onAgentStatusChanged(const QString& status) {
+void MainWindow::onAgentStatusChanged(const std::string& status) {
     currentAgentStatus_ = status;
     updateStatusBar();
 }
 
-void MainWindow::onErrorOccurred(const QString& error) {
+void MainWindow::onErrorOccurred(const std::string& error) {
     showStatusMessage("Error: " + error, 5000);
 }
 
@@ -362,13 +294,11 @@ void MainWindow::updateStatusBar() {
     timeLabel_->setText(currentTime.toString("yyyy-MM-dd hh:mm:ss"));
     
     // Update agent status
-    agentStatusLabel_->setText("Agent: " + currentAgentStatus_);
+    agentStatusLabel_->setText("Agent: " + QString::fromStdString(currentAgentStatus_));
 }
 
-void MainWindow::showStatusMessage(const QString& message, int timeoutMs) {
-    statusBar_->showMessage(message, timeoutMs);
+void MainWindow::showStatusMessage(const std::string& message, int timeoutMs) {
+    statusBar_->showMessage(QString::fromStdString(message), timeoutMs);
 }
 
 } // namespace SysMon
-
-#include "mainwindow.moc"

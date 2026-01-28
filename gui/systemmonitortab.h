@@ -12,6 +12,7 @@
 #include <QScrollArea>
 #include <memory>
 #include "../shared/systemtypes.h"
+#include "ipcclient.h"
 
 QT_BEGIN_NAMESPACE
 class QTableWidget;
@@ -20,9 +21,6 @@ class QLabel;
 class QTimer;
 class QGroupBox;
 QT_END_NAMESPACE
-
-// Forward declarations
-class IpcClient;
 
 namespace SysMon {
 
@@ -54,6 +52,7 @@ private:
     void setupCpuSection();
     void setupMemorySection();
     void setupProcessSection();
+    void setupProcessTableHeaders();
     void setupSystemStatsSection();
     
     // System info display

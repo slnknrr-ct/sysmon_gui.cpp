@@ -12,21 +12,19 @@
 #include <memory>
 #include "../shared/systemtypes.h"
 #include "../shared/commands.h"
+#include "ipcclient.h"
+#include "systemmonitortab.h"
+#include "devicemanagertab.h"
+#include "networkmanagertab.h"
+#include "processmanagertab.h"
+#include "androidtab.h"
+#include "automationtab.h"
 
 QT_BEGIN_NAMESPACE
 class QMenuBar;
 class QStatusBar;
 class QTabWidget;
 QT_END_NAMESPACE
-
-// Forward declarations
-class IpcClient;
-class SystemMonitorTab;
-class DeviceManagerTab;
-class NetworkManagerTab;
-class ProcessManagerTab;
-class AndroidTab;
-class AutomationTab;
 
 namespace SysMon {
 
@@ -53,8 +51,8 @@ private slots:
     
     // Status updates
     void onConnectionStatusChanged(bool connected);
-    void onAgentStatusChanged(const QString& status);
-    void onErrorOccurred(const QString& error);
+    void onAgentStatusChanged(const std::string& status);
+    void onErrorOccurred(const std::string& error);
 
 private:
     // UI initialization
@@ -79,7 +77,7 @@ private:
     
     // Status bar updates
     void updateStatusBar();
-    void showStatusMessage(const QString& message, int timeoutMs = 3000);
+    void showStatusMessage(const std::string& message, int timeoutMs = 3000);
     
     // UI components
     std::unique_ptr<QTabWidget> tabWidget_;
@@ -115,7 +113,7 @@ private:
     
     // Status
     bool isConnected_;
-    QString currentAgentStatus_;
+    std::string currentAgentStatus_;
     
     // Timer for status updates
     std::unique_ptr<QTimer> statusTimer_;

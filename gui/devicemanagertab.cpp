@@ -33,7 +33,7 @@ DeviceManagerTab::DeviceManagerTab(IpcClient* ipcClient, QWidget* parent)
     connect(ipcClient_, &IpcClient::responseReceived,
             this, &DeviceManagerTab::onUsbDevicesResponse);
     connect(ipcClient_, &IpcClient::errorOccurred,
-            this, &DeviceManagerTab::onError);
+            this, [this](const std::string& error) { onError(QString::fromStdString(error)); });
 }
 
 DeviceManagerTab::~DeviceManagerTab() {
@@ -245,7 +245,8 @@ void DeviceManagerTab::setupUI() {
 }
 
 void DeviceManagerTab::setupDeviceTable() {
-    deviceGroup_ = std::make_unique<QGroupBox("USB Devices");
+    deviceGroup_ = std::make_unique<QGroupBox>();
+    deviceGroup_->setTitle("USB Devices");
     deviceLayout_ = std::make_unique<QVBoxLayout>();
     
     deviceTable_ = std::make_unique<QTableWidget>();
@@ -260,22 +261,27 @@ void DeviceManagerTab::setupDeviceTable() {
 }
 
 void DeviceManagerTab::setupControlButtons() {
-    controlGroup_ = std::make_unique<QGroupBox("Device Control");
+    controlGroup_ = std::make_unique<QGroupBox>();
+    controlGroup_->setTitle("Device Control");
     controlLayout_ = std::make_unique<QHBoxLayout>();
     
-    refreshButton_ = std::make_unique<QPushButton("Refresh");
+    refreshButton_ = std::make_unique<QPushButton>();
+    refreshButton_->setText("Refresh");
     connect(refreshButton_.get(), &QPushButton::clicked,
             this, &DeviceManagerTab::refreshDevices);
     
-    enableButton_ = std::make_unique<QPushButton(ENABLE_TEXT);
+    enableButton_ = std::make_unique<QPushButton>();
+    enableButton_->setText(ENABLE_TEXT);
     connect(enableButton_.get(), &QPushButton::clicked,
             this, &DeviceManagerTab::enableDevice);
     
-    disableButton_ = std::make_unique<QPushButton(DISABLE_TEXT);
+    disableButton_ = std::make_unique<QPushButton>();
+    disableButton_->setText(DISABLE_TEXT);
     connect(disableButton_.get(), &QPushButton::clicked,
             this, &DeviceManagerTab::disableDevice);
     
-    autoConnectButton_ = std::make_unique<QPushButton(PREVENT_AUTO_TEXT);
+    autoConnectButton_ = std::make_unique<QPushButton>();
+    autoConnectButton_->setText(PREVENT_AUTO_TEXT);
     connect(autoConnectButton_.get(), &QPushButton::clicked,
             this, &DeviceManagerTab::toggleAutoConnect);
     
@@ -292,8 +298,10 @@ void DeviceManagerTab::setupStatusBar() {
     // Create status bar at bottom of tab
     auto statusLayout = std::make_unique<QHBoxLayout>();
     
-    statusLabel_ = std::make_unique<QLabel("Ready");
-    deviceCountLabel_ = std::make_unique<QLabel("Devices: 0");
+    statusLabel_ = std::make_unique<QLabel>();
+    statusLabel_->setText("Ready");
+    deviceCountLabel_ = std::make_unique<QLabel>();
+    deviceCountLabel_->setText("Devices: 0");
     
     statusLayout->addWidget(statusLabel_.get());
     statusLayout->addStretch();
@@ -428,5 +436,3 @@ void DeviceManagerTab::showDeviceOperationResult(const QString& operation, bool 
 }
 
 } // namespace SysMon
-
-#include "devicemanagertab.moc"

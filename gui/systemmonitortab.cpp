@@ -1,18 +1,21 @@
 #include "systemmonitortab.h"
-#include "../shared/commands.h"
-#include "../shared/ipcprotocol.h"
+#include "ipcclient.h"
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QGridLayout>
 #include <QLabel>
 #include <QProgressBar>
 #include <QTableWidget>
+#include <QListWidget>
 #include <QTimer>
 #include <QGroupBox>
 #include <QScrollArea>
 #include <QHeaderView>
+#include <QThread>
+#include <QScrollBar>
 #include <QShowEvent>
 #include <QHideEvent>
+#include <QMainWindow>
 
 namespace SysMon {
 
@@ -36,7 +39,7 @@ SystemMonitorTab::SystemMonitorTab(IpcClient* ipcClient, QWidget* parent)
     connect(ipcClient_, &IpcClient::responseReceived,
             this, &SystemMonitorTab::onSystemInfoResponse);
     connect(ipcClient_, &IpcClient::errorOccurred,
-            this, &SystemMonitorTab::onError);
+            this, [this](const std::string& error) { onError(QString::fromStdString(error)); });
 }
 
 SystemMonitorTab::~SystemMonitorTab() {
@@ -225,28 +228,14 @@ void SystemMonitorTab::onProcessListResponse(const Response& response) {
         }
     }
     
-    // If no processes parsed, create some placeholder data for testing
+    // If no processes, show appropriate message
     if (processes.empty()) {
-        // Create placeholder processes
-        ProcessInfo proc1;
-        proc1.pid = 1234;
-        proc1.name = "chrome";
-        proc1.cpuUsage = 15.5;
-        proc1.memoryUsage = 536870912ULL; // 512MB
-        proc1.status = "Running";
-        proc1.parentPid = 1;
-        proc1.user = "user";
-        processes.push_back(proc1);
-        
-        ProcessInfo proc2;
-        proc2.pid = 5678;
-        proc2.name = "firefox";
-        proc2.cpuUsage = 8.2;
-        proc2.memoryUsage = 268435456ULL; // 256MB
-        proc2.status = "Running";
-        proc2.parentPid = 1;
-        proc2.user = "user";
-        processes.push_back(proc2);
+        processTable_->setRowCount(1);
+        processTable_->setColumnCount(1);
+        QTableWidgetItem* noProcessItem = new QTableWidgetItem("No processes found");
+        noProcessItem->setForeground(Qt::gray);
+        processTable_->setItem(0, 0, noProcessItem);
+        return;
     }
     
     ProcessInfo proc;
@@ -278,20 +267,7 @@ void SystemMonitorTab::onError(const QString& error) {
     // Display error in UI
     qWarning() << "SystemMonitorTab error:" << error;
     
-    // Show error message in status bar or error label
-    if (errorLabel_) {
-        errorLabel_->setText(QString("Error: %1").arg(error));
-        errorLabel_->setStyleSheet("color: red; padding: 5px;");
-        
-        // Auto-hide error after 5 seconds
-        QTimer::singleShot(5000, this, [this]() {
-            if (errorLabel_) {
-                errorLabel_->clear();
-            }
-        });
-    }
-    
-    // Also show in main window status bar if available
+    // Show error in main window status bar if available
     if (auto mainWindow = qobject_cast<QMainWindow*>(parent())) {
         mainWindow->statusBar()->showMessage(error, 5000);
     }
@@ -303,7 +279,8 @@ void SystemMonitorTab::setupUI() {
     // Create scroll area
     scrollArea_ = std::make_unique<QScrollArea>();
     scrollWidget_ = new QWidget();
-    scrollLayout_ = std::make_unique<QVBoxLayout>(scrollWidget_);
+    scrollLayout_ = std::make_unique<QVBoxLayout>();
+    scrollWidget_->setLayout(scrollLayout_.get());
     
     setupSystemInfoSection();
     setupCpuSection();
@@ -318,17 +295,26 @@ void SystemMonitorTab::setupUI() {
 }
 
 void SystemMonitorTab::setupSystemInfoSection() {
-    systemInfoGroup_ = std::make_unique<QGroupBox>("System Information");
+    systemInfoGroup_ = std::make_unique<QGroupBox>();
+    systemInfoGroup_->setTitle("System Information");
     systemInfoLayout_ = std::make_unique<QGridLayout>();
     
-    uptimeLabel_ = std::make_unique<QLabel("Uptime:");
-    uptimeValue_ = std::make_unique<QLabel("0:00:00");
-    processCountLabel_ = std::make_unique<QLabel("Processes:");
-    processCountValue_ = std::make_unique<QLabel("0");
-    threadCountLabel_ = std::make_unique<QLabel("Threads:");
-    threadCountValue_ = std::make_unique<QLabel("0");
-    contextSwitchesLabel_ = std::make_unique<QLabel("Context Switches:");
-    contextSwitchesValue_ = std::make_unique<QLabel("0");
+    uptimeLabel_ = std::make_unique<QLabel>();
+    uptimeLabel_->setText("Uptime:");
+    uptimeValue_ = std::make_unique<QLabel>();
+    uptimeValue_->setText("0:00:00");
+    processCountLabel_ = std::make_unique<QLabel>();
+    processCountLabel_->setText("Processes:");
+    processCountValue_ = std::make_unique<QLabel>();
+    processCountValue_->setText("0");
+    threadCountLabel_ = std::make_unique<QLabel>();
+    threadCountLabel_->setText("Threads:");
+    threadCountValue_ = std::make_unique<QLabel>();
+    threadCountValue_->setText("0");
+    contextSwitchesLabel_ = std::make_unique<QLabel>();
+    contextSwitchesLabel_->setText("Context Switches:");
+    contextSwitchesValue_ = std::make_unique<QLabel>();
+    contextSwitchesValue_->setText("0");
     
     systemInfoLayout_->addWidget(uptimeLabel_.get(), 0, 0);
     systemInfoLayout_->addWidget(uptimeValue_.get(), 0, 1);
@@ -344,21 +330,30 @@ void SystemMonitorTab::setupSystemInfoSection() {
 }
 
 void SystemMonitorTab::setupCpuSection() {
-    cpuGroup_ = std::make_unique<QGroupBox("CPU Usage");
+    cpuGroup_ = std::make_unique<QGroupBox>();
+    cpuGroup_->setTitle("CPU Usage");
     cpuLayout_ = std::make_unique<QVBoxLayout>();
     
-    cpuTotalLabel_ = std::make_unique<QLabel("Total CPU:");
+    cpuTotalLabel_ = std::make_unique<QLabel>();
+    cpuTotalLabel_->setText("Total CPU:");
     cpuTotalBar_ = std::make_unique<QProgressBar>();
-    cpuTotalValue_ = std::make_unique<QLabel("0%");
+    cpuTotalValue_ = std::make_unique<QLabel>();
+    cpuTotalValue_->setText("0%");
     
-    cpuCoresLabel_ = std::make_unique<QLabel("CPU Cores:");
-    cpuCoresWidget_ = new QWidget();
-    cpuCoresLayout_ = std::make_unique<QVBoxLayout>(cpuCoresWidget_);
+    cpuCoresLabel_ = std::make_unique<QLabel>();
+    cpuCoresLabel_->setText("CPU Cores:");
+    cpuCoresWidget_ = std::make_unique<QWidget>();
+    cpuCoresLayout_ = std::make_unique<QVBoxLayout>();
+    cpuCoresWidget_->setLayout(cpuCoresLayout_.get());
     
-    // Create core progress bars (placeholder for 4 cores)
-    for (int i = 0; i < 4; ++i) {
+    // Create core progress bars - will be dynamically updated based on actual CPU cores
+    int coreCount = QThread::idealThreadCount();
+    if (coreCount <= 0) coreCount = 4; // Fallback to 4 cores
+    
+    for (int i = 0; i < coreCount; ++i) {
         auto bar = std::make_unique<QProgressBar>();
-        auto label = std::make_unique<QLabel(QString("Core %1: 0%").arg(i)));
+        auto label = std::make_unique<QLabel>();
+        label->setText(QString("Core %1: 0%").arg(i));
         
         cpuCoreBars_.push_back(std::move(bar));
         cpuCoreLabels_.push_back(std::move(label));
@@ -378,23 +373,30 @@ void SystemMonitorTab::setupCpuSection() {
     
     cpuLayout_->addLayout(totalLayout.release());
     cpuLayout_->addWidget(cpuCoresLabel_.get());
-    cpuLayout_->addWidget(cpuCoresWidget_);
+    cpuLayout_->addWidget(cpuCoresWidget_.get());
     
     cpuGroup_->setLayout(cpuLayout_.get());
     scrollLayout_->addWidget(cpuGroup_.get());
 }
 
 void SystemMonitorTab::setupMemorySection() {
-    memoryGroup_ = std::make_unique<QGroupBox("Memory Usage");
+    memoryGroup_ = std::make_unique<QGroupBox>();
+    memoryGroup_->setTitle("Memory Usage");
     memoryLayout_ = std::make_unique<QVBoxLayout>();
     
-    memoryTotalLabel_ = std::make_unique<QLabel("Total Memory:");
-    memoryTotalValue_ = std::make_unique<QLabel("0 GB");
+    memoryTotalLabel_ = std::make_unique<QLabel>();
+    memoryTotalLabel_->setText("Total Memory:");
+    memoryTotalValue_ = std::make_unique<QLabel>();
+    memoryTotalValue_->setText("0 GB");
     memoryUsedBar_ = std::make_unique<QProgressBar>();
-    memoryUsedValue_ = std::make_unique<QLabel("Used: 0 GB");
-    memoryFreeValue_ = std::make_unique<QLabel("Free: 0 GB");
-    memoryCacheValue_ = std::make_unique<QLabel("Cache: 0 GB");
-    memoryBuffersValue_ = std::make_unique<QLabel>("Buffers: 0 GB");
+    memoryUsedValue_ = std::make_unique<QLabel>();
+    memoryUsedValue_->setText("Used: 0 GB");
+    memoryFreeValue_ = std::make_unique<QLabel>();
+    memoryFreeValue_->setText("Free: 0 GB");
+    memoryCacheValue_ = std::make_unique<QLabel>();
+    memoryCacheValue_->setText("Cache: 0 GB");
+    memoryBuffersValue_ = std::make_unique<QLabel>();
+    memoryBuffersValue_->setText("Buffers: 0 GB");
     
     memoryLayout_->addWidget(memoryTotalLabel_.get());
     memoryLayout_->addWidget(memoryTotalValue_.get());
@@ -409,7 +411,8 @@ void SystemMonitorTab::setupMemorySection() {
 }
 
 void SystemMonitorTab::setupProcessSection() {
-    processGroup_ = std::make_unique<QGroupBox("Processes");
+    processGroup_ = std::make_unique<QGroupBox>();
+    processGroup_->setTitle("Processes");
     processLayout_ = std::make_unique<QVBoxLayout>();
     
     processTable_ = std::make_unique<QTableWidget>();
@@ -527,5 +530,3 @@ QString SystemMonitorTab::formatCoresUsage(const std::vector<double>& cores) con
 }
 
 } // namespace SysMon
-
-#include "systemmonitortab.moc"

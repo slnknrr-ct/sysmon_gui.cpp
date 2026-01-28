@@ -621,5 +621,3 @@ QString AutomationTab::formatRuleEnabled(bool enabled) const {
 }
 
 } // namespace SysMon
-
-#include "automationtab.moc"

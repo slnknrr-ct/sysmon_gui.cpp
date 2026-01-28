@@ -38,6 +38,7 @@ private:
     // JSON parsing helpers
     static bool parseJson(const std::string& json, std::map<std::string, std::string>& result);
     static std::string createJson(const std::map<std::string, std::string>& data);
+    static std::string escapeJsonString(const std::string& input);
     
     // Type conversion helpers
     static std::string commandTypeToString(CommandType type);
@@ -48,6 +49,10 @@ private:
     
     static std::string commandStatusToString(CommandStatus status);
     static CommandStatus stringToCommandStatus(const std::string& str);
+    
+    // Constants
+    static constexpr size_t MAX_MESSAGE_SIZE = 1024 * 1024; // 1MB max message size
+    static constexpr size_t MAX_FIELD_COUNT = 100; // Max fields per message
     
     // Error state
     static thread_local std::string lastError_;

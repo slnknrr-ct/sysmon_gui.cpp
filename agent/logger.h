@@ -97,9 +97,9 @@ private:
     static constexpr size_t MAX_QUEUE_SIZE = 10000;
 };
 
-// Convenience macros for logging
-#define LOG_INFO(logger, message) (logger)->info(message)
-#define LOG_WARNING(logger, message) (logger)->warning(message)
-#define LOG_ERROR(logger, message) (logger)->error(message)
+// Convenience macros for logging (agent-specific)
+#define AGENT_LOG_INFO(logger, message) (logger)->info(message)
+#define AGENT_LOG_WARNING(logger, message) (logger)->warning(message)
+#define AGENT_LOG_ERROR(logger, message) (logger)->error(message)
 
 } // namespace SysMon

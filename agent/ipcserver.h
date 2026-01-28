@@ -3,6 +3,8 @@
 #include "../shared/systemtypes.h"
 #include "../shared/commands.h"
 #include "../shared/ipcprotocol.h"
+#include "../shared/security.h"
+#include "../shared/constants.h"
 #include <memory>
 #include <thread>
 #include <atomic>
@@ -34,8 +36,14 @@ class Logger;
 struct ClientConnection {
     std::string id;
     std::string address;
+    std::string authToken;
     std::chrono::system_clock::time_point connectTime;
     std::chrono::system_clock::time_point lastActivity;
+    int failedAuthAttempts;
+    bool isAuthenticated;
+    std::chrono::system_clock::time_point lockoutUntil;
+    
+    ClientConnection() : failedAuthAttempts(0), isAuthenticated(false) {}
 };
 
 // IPC Server - handles communication with GUI clients
@@ -82,6 +90,10 @@ private:
     
     // Message handling
     void processClientMessage(const std::string& clientId, const std::string& message);
+    bool authenticateClient(const std::string& clientId, const std::string& token);
+    bool isClientAuthenticated(const std::string& clientId);
+    bool isRateLimited(const std::string& clientId);
+    void handleAuthentication(const std::string& clientId, const std::string& message);
     
     // Network helpers
     bool createServerSocket(int port);
@@ -94,6 +106,7 @@ private:
     int port_;
     std::atomic<bool> running_;
     std::atomic<bool> initialized_;
+    std::atomic<bool> shuttingDown_;
     
     // Thread management
     std::thread serverThread_;
@@ -108,11 +121,11 @@ private:
     CommandHandler commandHandler_;
     EventHandler eventHandler_;
     Logger* logger_;
+    Security::SecurityManager* securityManager_;
     
     // Constants
-    static constexpr int MAX_CLIENTS = 10;
     static constexpr int BUFFER_SIZE = 4096;
-    static constexpr std::chrono::seconds CLIENT_TIMEOUT{300}; // 5 minutes
+    static constexpr std::chrono::milliseconds SHUTDOWN_TIMEOUT{5000}; // 5 seconds shutdown timeout
 };
 
 } // namespace SysMon

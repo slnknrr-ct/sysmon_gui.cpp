@@ -1,5 +1,5 @@
 @echo off
-echo Setting up environment for SysMon3 build...
+echo Setting up environment for SysMon3 build (without OpenSSL)...
 echo.
 
 REM Set up paths for MinGW, Qt 6.10.1, CMake and Ninja
@@ -36,8 +36,8 @@ mkdir build
 cd build
 
 echo.
-echo Running CMake configuration with Ninja generator...
-cmake .. -G "Ninja" -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=C:\Qt\6.10.1\mingw_64 -DOPENSSL_ROOT_DIR=C:\Qt\Tools\OpenSSL
+echo Running CMake configuration with Ninja generator (without OpenSSL)...
+cmake .. -G "Ninja" -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=C:\Qt\6.10.1\mingw_64 -DSYSMON_NO_OPENSSL=ON
 
 if %ERRORLEVEL% neq 0 (
     echo CMake configuration failed!
@@ -47,7 +47,6 @@ if %ERRORLEVEL% neq 0 (
     echo 2. Check MinGW installation at C:\Qt\Tools\mingw1310_64
     echo 3. Check CMake installation
     echo 4. Check Ninja installation
-    echo 5. Check OpenSSL installation at C:\Qt\Tools\OpenSSL
     pause
     exit /b 1
 )
@@ -76,12 +75,6 @@ copy sysmon_gui.exe dist\bin\ >nul 2>&1
 copy ..\sysmon_agent.conf.example dist\bin\ >nul 2>&1
 
 echo.
-echo Copying OpenSSL dependencies...
-for %%f in (libcrypto-3-x64.dll libssl-3-x64.dll) do (
-    copy "C:\Qt\Tools\OpenSSL\bin\%%f" "dist\bin\" >nul 2>&1
-)
-
-echo.
 echo Copying Qt dependencies...
 for %%f in (Qt6Core.dll Qt6Widgets.dll) do (
     copy "C:\Qt\6.10.1\mingw_64\bin\%%f" "dist\bin\" >nul 2>&1
@@ -106,6 +99,9 @@ echo 2. Run dist\bin\sysmon_gui.exe
 echo.
 echo Configuration file: dist\bin\sysmon_agent.conf.example
 echo Copy it to sysmon_agent.conf and modify as needed.
+echo.
+echo NOTE: This build was created without OpenSSL support.
+echo Security features will be disabled.
 echo.
 echo Project structure:
 echo - Agent: System monitoring service with privileges

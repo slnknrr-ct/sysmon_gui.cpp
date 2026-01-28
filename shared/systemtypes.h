@@ -7,6 +7,20 @@
 
 namespace SysMon {
 
+// Validation utilities
+namespace Validation {
+    bool isValidCpuUsage(double usage);
+    bool isValidMemoryValue(uint64_t value);
+    bool isValidProcessId(uint32_t pid);
+    bool isValidPercentage(double value);
+    bool isValidPort(int port);
+    bool isValidNonEmptyString(const std::string& str);
+    bool isValidVidPid(const std::string& vidPid);
+    bool isValidIpAddress(const std::string& ip);
+    bool isValidAndroidSerial(const std::string& serial);
+    bool isValidRuleId(const std::string& ruleId);
+}
+
 // Basic system information structures
 struct SystemInfo {
     double cpuUsageTotal;
@@ -22,6 +36,10 @@ struct SystemInfo {
     std::chrono::seconds uptime;
     
     SystemInfo();
+    
+    // Validation
+    bool isValid() const;
+    void sanitize(); // Fix invalid values
 };
 
 struct ProcessInfo {
@@ -34,6 +52,10 @@ struct ProcessInfo {
     std::string user;
     
     ProcessInfo();
+    
+    // Validation
+    bool isValid() const;
+    void sanitize();
 };
 
 struct NetworkInterface {
@@ -47,6 +69,10 @@ struct NetworkInterface {
     double txSpeed;
     
     NetworkInterface();
+    
+    // Validation
+    bool isValid() const;
+    void sanitize();
 };
 
 struct UsbDevice {
@@ -58,6 +84,10 @@ struct UsbDevice {
     bool isEnabled;
     
     UsbDevice();
+    
+    // Validation
+    bool isValid() const;
+    void sanitize();
 };
 
 struct AndroidDeviceInfo {
@@ -70,6 +100,10 @@ struct AndroidDeviceInfo {
     std::string foregroundApp;
     
     AndroidDeviceInfo();
+    
+    // Validation
+    bool isValid() const;
+    void sanitize();
 };
 
 struct AutomationRule {
@@ -80,6 +114,10 @@ struct AutomationRule {
     std::chrono::seconds duration;
     
     AutomationRule();
+    
+    // Validation
+    bool isValid() const;
+    void sanitize();
 };
 
 // Common enums
