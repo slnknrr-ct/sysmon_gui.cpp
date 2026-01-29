@@ -7,6 +7,8 @@
 #include <QScrollBar>
 #include <QColor>
 #include <QMutexLocker>
+#include <thread>
+#include <functional>
 
 namespace SysMon {
 
@@ -147,7 +149,7 @@ QString GuiLogger::formatLogEntry(const LogEntry& entry) const {
         .arg(color)
         .arg(timestamp)
         .arg(level)
-        .arg(QString::number(reinterpret_cast<quintptr>(entry.threadId)))
+        .arg(QString::number(std::hash<std::thread::id>{}(entry.threadId)))
         .arg(QString::fromStdString(entry.message));
 }
 

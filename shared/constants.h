@@ -32,7 +32,7 @@ constexpr uint32_t DEFAULT_PROCESS_COUNT = 150;
 constexpr uint32_t DEFAULT_THREAD_COUNT = 320;
 
 // Network constants
-constexpr uint16_t DEFAULT_IPC_PORT = 12345;
+constexpr uint16_t DEFAULT_IPC_PORT = 8081;
 constexpr int DEFAULT_NETLINK_BUFFER_SIZE = 4096;
 constexpr int MAX_NETWORK_INTERFACES = 32;
 

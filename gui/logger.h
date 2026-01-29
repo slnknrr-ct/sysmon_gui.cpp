@@ -9,6 +9,7 @@
 #include <QTimer>
 #include <QMutex>
 #include <QQueue>
+#include <thread>
 
 QT_BEGIN_NAMESPACE
 class QTextEdit;
@@ -51,6 +52,7 @@ private:
         LogLevel level;
         std::string message;
         std::chrono::system_clock::time_point timestamp;
+        std::thread::id threadId;
     };
     
     // Log processing
@@ -82,6 +84,7 @@ private:
     
     // Constants
     static constexpr size_t DEFAULT_MAX_ENTRIES = 1000;
+    static constexpr size_t MAX_QUEUE_SIZE = 10000;
     static constexpr int PROCESS_INTERVAL = 100; // 100ms
 };
 

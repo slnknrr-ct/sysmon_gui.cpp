@@ -11,7 +11,7 @@ This document provides comprehensive API reference for SysMon3, including IPC pr
 #### Server Connection
 ```cpp
 // Connect to SysMon3 agent
-bool connectToAgent(const std::string& host = "localhost", int port = 12345);
+bool connectToAgent(const std::string& host = "localhost", int port = 8081);
 ```
 
 #### Authentication
@@ -910,7 +910,7 @@ TEST(SecurityTest, RateLimiting) {
 ### Integration Test Examples
 ```bash
 # Test IPC communication
-./test_ipc --host localhost --port 12345
+./test_ipc --host localhost --port 8081
 
 # Test Android integration
 ./test_android --serial ABC123
@@ -929,7 +929,7 @@ int main() {
     SysMon::GUI::IpcClient client;
     
     // Connect to agent
-    if (!client.connectToAgent("localhost", 12345)) {
+    if (!client.connectToAgent("localhost", 8081)) {
         std::cerr << "Failed to connect" << std::endl;
         return 1;
     }
@@ -952,7 +952,7 @@ int main() {
 import sysmon3_client
 
 client = sysmon3_client.IpcClient()
-client.connect("localhost", 12345)
+client.connect("localhost", 8081)
 client.authenticate()
 
 response = client.get_system_info()
@@ -964,7 +964,7 @@ print(response.data)
 ### Configuration Structure
 ```ini
 [server]
-port = 12345
+port = 8081
 max_clients = 10
 bind_address = 127.0.0.1
 

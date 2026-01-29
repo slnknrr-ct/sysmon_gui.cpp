@@ -31,6 +31,10 @@ public:
     void stop();
     void shutdown();
     
+    // Fallback mode support
+    void enableFallbackMode();
+    bool isFallbackMode() const;
+    
     // Data collection
     SystemInfo getCurrentSystemInfo();
     std::vector<ProcessInfo> getProcessList();
@@ -75,6 +79,7 @@ private:
     std::thread monitoringThread_;
     std::atomic<bool> running_;
     std::atomic<bool> initialized_;
+    std::atomic<bool> fallbackMode_;
     
     // Data storage
     SystemInfo currentSystemInfo_;

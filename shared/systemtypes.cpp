@@ -3,6 +3,7 @@
 #include <iomanip>
 #include <algorithm>
 #include <regex>
+#include <chrono>
 
 namespace SysMon {
 
@@ -165,6 +166,22 @@ UsbDevice::UsbDevice()
     , isEnabled(false) {
 }
 
+bool UsbDevice::isValid() const {
+    return Validation::isValidVidPid(vid + ":" + pid) &&
+           Validation::isValidNonEmptyString(name) &&
+           Validation::isValidNonEmptyString(serialNumber);
+}
+
+void UsbDevice::sanitize() {
+    // Truncate strings if too long
+    if (name.length() > 128) name = name.substr(0, 128);
+    if (serialNumber.length() > 64) serialNumber = serialNumber.substr(0, 64);
+    
+    // Ensure VID/PID format
+    if (vid.length() != 4) vid = "0000";
+    if (pid.length() != 4) pid = "0000";
+}
+
 // Implementation of AndroidDeviceInfo methods
 AndroidDeviceInfo::AndroidDeviceInfo()
     : batteryLevel(0)
@@ -172,10 +189,44 @@ AndroidDeviceInfo::AndroidDeviceInfo()
     , isLocked(false) {
 }
 
+bool AndroidDeviceInfo::isValid() const {
+    return Validation::isValidAndroidSerial(serialNumber) &&
+           Validation::isValidNonEmptyString(model) &&
+           Validation::isValidNonEmptyString(androidVersion) &&
+           batteryLevel >= 0 && batteryLevel <= 100;
+}
+
+void AndroidDeviceInfo::sanitize() {
+    // Clamp battery level to valid range
+    batteryLevel = std::max(0, std::min(100, batteryLevel));
+    
+    // Truncate strings if too long
+    if (model.length() > 64) model = model.substr(0, 64);
+    if (androidVersion.length() > 32) androidVersion = androidVersion.substr(0, 32);
+    if (foregroundApp.length() > 128) foregroundApp = foregroundApp.substr(0, 128);
+}
+
 // Implementation of AutomationRule methods
 AutomationRule::AutomationRule()
     : isEnabled(false)
     , duration(0) {
+}
+
+bool AutomationRule::isValid() const {
+    return Validation::isValidRuleId(id) &&
+           Validation::isValidNonEmptyString(condition) &&
+           Validation::isValidNonEmptyString(action);
+}
+
+void AutomationRule::sanitize() {
+    // Truncate strings if too long
+    if (condition.length() > 512) condition = condition.substr(0, 512);
+    if (action.length() > 512) action = action.substr(0, 512);
+    
+    // Ensure valid rule ID
+    if (id.empty()) {
+        id = "rule_" + std::to_string(std::chrono::system_clock::now().time_since_epoch().count());
+    }
 }
 
 // Utility functions for string conversion

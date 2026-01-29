@@ -118,6 +118,7 @@ private:
     bool validateParameters(const Command& command, const std::vector<std::string>& requiredParams);
     void logCommand(const Command& command, const std::string& status);
     void logError(const std::string& function, const std::exception& e);
+    Response createFallbackResponse(const std::string& commandId, const std::string& data, const std::string& componentName);
 };
 
 } // namespace SysMon

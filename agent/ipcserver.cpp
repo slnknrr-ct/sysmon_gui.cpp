@@ -7,6 +7,7 @@
 #include <sstream>
 #include <future>
 #include <atomic>
+#include <cerrno>
 
 #ifdef _WIN32
 #include <winsock2.h>
@@ -16,8 +17,8 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <unistd.h>
-#include <cstring>
 #include <fcntl.h>
+#include <cstring>
 #endif
 
 namespace SysMon {
@@ -248,16 +249,12 @@ void IpcServer::serverThread() {
         try {
             acceptConnections();
             cleanupInactiveClients();
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            std::this_thread::sleep_for(std::chrono::milliseconds(10)); // Уменьшили с 100мс до 10мс
         } catch (const std::exception& e) {
             if (logger_) {
-                logger_->error("Exception in server thread: " + std::string(e.what()));
+                logger_->error("Exception in server loop: " + std::string(e.what()));
             }
-            
-            // Don't sleep too long if we're shutting down
-            if (!shuttingDown_) {
-                std::this_thread::sleep_for(std::chrono::milliseconds(1000));
-            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
         }
     }
     
@@ -295,6 +292,15 @@ void IpcServer::acceptConnections() {
 #endif
         return;
     }
+    
+    // Log new connection
+    if (logger_) {
+        logger_->info("New client connected from: " + std::string(inet_ntoa(clientAddr.sin_addr)) + 
+                     " on socket " + std::to_string(clientSocket));
+    }
+    
+    std::cout << "New client connected from " << inet_ntoa(clientAddr.sin_addr) 
+              << " on socket " << clientSocket << std::endl;
     
     // Check client limit
     {
@@ -468,6 +474,8 @@ bool IpcServer::isRateLimited(const std::string& clientId) {
 }
 
 void IpcServer::handleAuthentication(const std::string& clientId, const std::string& message) {
+    std::cout << "Handling authentication for client " << clientId << std::endl;
+    
     try {
         // Try to parse as authentication request
         auto messageType = IpcProtocol::getMessageType(message);
@@ -478,6 +486,7 @@ void IpcServer::handleAuthentication(const std::string& clientId, const std::str
             // Check if this is an authentication command
             if (command.type == CommandType::PING && command.parameters.find("auth_token") != command.parameters.end()) {
                 std::string token = command.parameters.at("auth_token");
+                std::cout << "Received authentication token: " << token << " from client " << clientId << std::endl;
                 
                 std::lock_guard<std::mutex> lock(clientsMutex_);
                 auto it = clients_.find(clientId);
@@ -494,6 +503,7 @@ void IpcServer::handleAuthentication(const std::string& clientId, const std::str
                     }
                     
                     if (authenticateClient(clientId, token)) {
+                        std::cout << "Authentication successful for client " << clientId << std::endl;
                         client.isAuthenticated = true;
                         client.failedAuthAttempts = 0;
                         
@@ -505,6 +515,7 @@ void IpcServer::handleAuthentication(const std::string& clientId, const std::str
                             "Authentication successful");
                         sendResponseToClient(clientId, successResponse);
                     } else {
+                        std::cout << "Authentication failed for client " << clientId << std::endl;
                         client.failedAuthAttempts++;
                         
                         if (client.failedAuthAttempts >= Constants::MAX_LOGIN_ATTEMPTS) {
@@ -525,6 +536,7 @@ void IpcServer::handleAuthentication(const std::string& clientId, const std::str
                     }
                 }
             } else {
+                std::cout << "Non-authentication command received from unauthenticated client " << clientId << std::endl;
                 // Client is not authenticated and this is not an auth request
                 Response errorResponse = createResponse("auth_required", CommandStatus::FAILED, 
                     "Authentication required");
@@ -587,6 +599,10 @@ bool IpcServer::createServerSocket(int port) {
         return false;
     }
     
+    if (logger_) {
+        logger_->info("Creating server socket on port " + std::to_string(port));
+    }
+    
     // Set socket options
     int opt = 1;
     if (setsockopt(serverSocket_, SOL_SOCKET, SO_REUSEADDR, (char*)&opt, sizeof(opt)) < 0) {
@@ -610,8 +626,21 @@ bool IpcServer::createServerSocket(int port) {
     serverAddr.sin_port = htons(port);
     
     if (bind(serverSocket_, (struct sockaddr*)&serverAddr, sizeof(serverAddr)) < 0) {
+        int errorCode = 
+#ifdef _WIN32
+            WSAGetLastError();
+#else
+            errno;
+#endif
+        
         if (logger_) {
-            logger_->error("Failed to bind server socket to port " + std::to_string(port));
+            logger_->error("Failed to bind server socket to port " + std::to_string(port) + 
+                          " (error code: " + std::to_string(errorCode) + ")");
+            
+            if (errorCode == EADDRINUSE) {
+                logger_->error("Port " + std::to_string(port) + " is already in use. "
+                              "Please check if another agent is running or choose a different port.");
+            }
         }
         closeServerSocket();
         return false;
@@ -627,6 +656,7 @@ bool IpcServer::createServerSocket(int port) {
     
     if (logger_) {
         logger_->info("Server socket created and listening on port " + std::to_string(port));
+        std::cout << "IPC Server listening on port " << port << std::endl;
     }
     
     return true;

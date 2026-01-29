@@ -16,9 +16,9 @@ namespace {
         g_agent = std::move(agent);
     }
     
-    std::unique_ptr<AgentCore> getAgent() {
+    AgentCore* getAgent() {
         std::lock_guard<std::mutex> lock(g_agentMutex);
-        return std::move(g_agent);
+        return g_agent.get();
     }
     
     void stopAgent() {
@@ -74,9 +74,6 @@ int main(int argc, char* argv[]) {
             currentAgent->shutdown();
             return 1;
         }
-        
-        // Put agent back for signal handling
-        setAgent(std::move(currentAgent));
         
         std::cout << "SysMon3 Agent started successfully" << std::endl;
         std::cout << "Press Ctrl+C to stop" << std::endl;

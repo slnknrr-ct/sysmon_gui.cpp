@@ -82,6 +82,10 @@ private:
     // Formatters
     QString formatSpeed(double speed) const;
     
+    // UI state management
+    void updateButtonStates();
+    void showInterfaceOperationResult(const QString& operation, bool success, const QString& message = "");
+    
     // Static IP dialog
     void createStaticIpDialog();
     void resetStaticIpDialog();

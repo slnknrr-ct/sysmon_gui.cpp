@@ -70,22 +70,45 @@ if not exist dist mkdir dist
 if not exist dist\bin mkdir dist\bin
 
 echo.
-echo Copying binaries to distribution...
-copy sysmon_agent.exe dist\bin\ >nul 2>&1
-copy sysmon_gui.exe dist\bin\ >nul 2>&1
+echo Copying configuration file...
 copy ..\sysmon_agent.conf.example dist\bin\ >nul 2>&1
 
 echo.
-echo Copying OpenSSL dependencies...
-for %%f in (libcrypto-3-x64.dll libssl-3-x64.dll) do (
-    copy "C:\Qt\Tools\OpenSSL\bin\%%f" "dist\bin\" >nul 2>&1
+echo Copying Qt dependencies...
+for %%f in (Qt6Core.dll Qt6Widgets.dll Qt6Gui.dll Qt6Network.dll) do (
+    copy "C:\Qt\6.10.1\mingw_64\bin\%%f" "dist\bin\" >nul 2>&1
 )
 
 echo.
-echo Copying Qt dependencies...
-for %%f in (Qt6Core.dll Qt6Widgets.dll) do (
-    copy "C:\Qt\6.10.1\mingw_64\bin\%%f" "dist\bin\" >nul 2>&1
-)
+echo Copying Qt platform plugins...
+if not exist dist\bin\platforms mkdir dist\bin\platforms
+copy "C:\Qt\6.10.1\mingw_64\plugins\platforms\qwindows.dll" "dist\bin\platforms\" >nul 2>&1
+copy "C:\Qt\6.10.1\mingw_64\plugins\platforms\qminimal.dll" "dist\bin\platforms\" >nul 2>&1
+
+echo.
+echo Copying Qt image format plugins...
+if not exist dist\bin\imageformats mkdir dist\bin\imageformats
+copy "C:\Qt\6.10.1\mingw_64\plugins\imageformats\qjpeg.dll" "dist\bin\imageformats\" >nul 2>&1
+copy "C:\Qt\6.10.1\mingw_64\plugins\imageformats\qpng.dll" "dist\bin\imageformats\" >nul 2>&1
+
+echo.
+echo Copying OpenSSL libraries...
+copy "C:\Qt\Tools\OpenSSL\bin\libcrypto-3-x64.dll" "dist\bin\" >nul 2>&1
+copy "C:\Qt\Tools\OpenSSL\bin\libssl-3-x64.dll" "dist\bin\" >nul 2>&1
+
+echo.
+echo Creating launcher scripts...
+echo @echo off > dist\bin\run_agent.bat
+echo echo Starting SysMon3 Agent... >> dist\bin\run_agent.bat
+echo set QT_PLUGIN_PATH=%%~dp0platforms >> dist\bin\run_agent.bat
+echo set QT_QPA_PLATFORM_PLUGIN_PATH=%%~dp0platforms >> dist\bin\run_agent.bat
+echo "%%~dp0sysmon_agent.exe" >> dist\bin\run_agent.bat
+
+echo @echo off > dist\bin\run_gui.bat
+echo echo Starting SysMon3 GUI... >> dist\bin\run_gui.bat
+echo set QT_PLUGIN_PATH=%%~dp0platforms >> dist\bin\run_gui.bat
+echo set QT_QPA_PLATFORM_PLUGIN_PATH=%%~dp0platforms >> dist\bin\run_gui.bat
+echo "%%~dp0sysmon_gui.exe" >> dist\bin\run_gui.bat
 
 echo.
 echo Copying MinGW runtime dependencies...

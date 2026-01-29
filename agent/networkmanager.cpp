@@ -27,6 +27,7 @@ namespace SysMon {
 NetworkManager::NetworkManager() 
     : running_(false)
     , initialized_(false)
+    , fallbackMode_(false)
     , statsUpdateInterval_(2000)
     , hIphlpapi_(nullptr)
     , pGetAdaptersAddresses_(nullptr)
@@ -55,7 +56,9 @@ bool NetworkManager::initialize() {
     hIphlpapi_ = LoadLibraryA("Iphlpapi.dll");
     if (!hIphlpapi_) {
         std::cerr << "Failed to load Iphlpapi.dll" << std::endl;
-        return false;
+        fallbackMode_ = true;
+        initialized_ = true; // Allow fallback mode
+        return true;
     }
     
     // Get function pointers
@@ -67,27 +70,33 @@ bool NetworkManager::initialize() {
         std::cerr << "Failed to get IP Helper API function pointers" << std::endl;
         FreeLibrary(hIphlpapi_);
         hIphlpapi_ = nullptr;
-        return false;
+        fallbackMode_ = true;
+        initialized_ = true; // Allow fallback mode
+        return true;
     }
 #else
     // Initialize netlink socket for Linux
     netlinkSocket_ = socket(AF_NETLINK, SOCK_RAW, NETLINK_ROUTE);
     if (netlinkSocket_ < 0) {
         std::cerr << "Failed to create netlink socket: " << strerror(errno) << std::endl;
-        return false;
+        fallbackMode_ = true;
+        initialized_ = true; // Allow fallback mode
+        return true;
     }
     
     // Bind socket
     struct sockaddr_nl addr;
     memset(&addr, 0, sizeof(addr));
     addr.nl_family = AF_NETLINK;
-    addr.nl_groups = RTMGRP_LINK | RTMGRP_IPV4_ROUTE | RTMGRP_IPV6_ROUTE;
+    addr.nl_groups = RTMGRP_LINK | RTMGRP_IPV4_ROUTE;
     
     if (bind(netlinkSocket_, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
         std::cerr << "Failed to bind netlink socket: " << strerror(errno) << std::endl;
         close(netlinkSocket_);
         netlinkSocket_ = -1;
-        return false;
+        fallbackMode_ = true;
+        initialized_ = true; // Allow fallback mode
+        return true;
     }
 #endif
     
@@ -380,15 +389,31 @@ bool NetworkManager::enableInterfaceLinux(const std::string& interfaceName) {
 }
 
 bool NetworkManager::enableInterfaceWindows(const std::string& interfaceName) {
-    // Temporary simplified implementation
-    (void)interfaceName;
-    return true;
+    // Convert interface name to wide string
+    std::wstring wideName(interfaceName.begin(), interfaceName.end());
+    
+    // Configure interface enable using netsh
+    std::wstring cmd = L"netsh interface set interface \"" + wideName + L"\" enable";
+    
+    int result = _wsystem(cmd.c_str());
+    return result == 0;
 }
 
 bool NetworkManager::disableInterfaceLinux(const std::string& interfaceName) {
     // Use system command to disable interface
     std::string command = "ip link set " + interfaceName + " down";
     int result = system(command.c_str());
+    return result == 0;
+}
+
+bool NetworkManager::disableInterfaceWindows(const std::string& interfaceName) {
+    // Convert interface name to wide string
+    std::wstring wideName(interfaceName.begin(), interfaceName.end());
+    
+    // Configure interface disable using netsh
+    std::wstring cmd = L"netsh interface set interface \"" + wideName + L"\" disable";
+    
+    int result = _wsystem(cmd.c_str());
     return result == 0;
 }
 
@@ -458,6 +483,31 @@ bool NetworkManager::setDhcpIpWindows(const std::string& interfaceName) {
     
     int result = _wsystem(cmd.c_str());
     return result == 0;
+}
+
+// Fallback mode support
+void NetworkManager::enableFallbackMode() {
+    fallbackMode_ = true;
+    initialized_ = true;
+    
+    // Create a basic fallback interface
+    NetworkInterface fallbackInterface;
+    fallbackInterface.name = "fallback";
+    fallbackInterface.ipv4 = "127.0.0.1";
+    fallbackInterface.ipv6 = "::1";
+    fallbackInterface.isEnabled = true;
+    fallbackInterface.rxBytes = 0;
+    fallbackInterface.txBytes = 0;
+    fallbackInterface.rxSpeed = 0.0;
+    fallbackInterface.txSpeed = 0.0;
+    
+    std::lock_guard<std::shared_mutex> lock(interfacesMutex_);
+    interfaces_.clear();
+    interfaces_.push_back(fallbackInterface);
+}
+
+bool NetworkManager::isFallbackMode() const {
+    return fallbackMode_;
 }
 
 } // namespace SysMon

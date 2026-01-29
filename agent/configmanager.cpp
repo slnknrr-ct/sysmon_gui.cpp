@@ -154,9 +154,33 @@ std::vector<AutomationRule> ConfigManager::loadAutomationRules() {
         return rules;
     }
     
-    // TODO: Parse automation rules from config
-    // This is a basic placeholder implementation
+    // TODO: Implement comprehensive automation rules parsing from config
+    // Current implementation provides a basic placeholder for development
+    // 
+    // Future implementation should support:
+    // 1. JSON format rules:
+    //    automation_rules = [
+    //      {
+    //        "id": "rule1",
+    //        "condition": "CPU_LOAD > 80%",
+    //        "action": "DISABLE_USB 1234:5678",
+    //        "enabled": true,
+    //        "duration": 10
+    //      }
+    //    ]
+    //
+    // 2. INI format rules:
+    //    rule.1.id = rule1
+    //    rule.1.condition = CPU_LOAD > 80%
+    //    rule.1.action = DISABLE_USB 1234:5678
+    //    rule.1.enabled = true
+    //    rule.1.duration = 10
+    //
+    // 3. Validation of rule syntax and semantics
+    // 4. Rule priority and conflict resolution
+    // 5. Rule templates and inheritance
     
+    // Basic placeholder implementation for development
     AutomationRule rule;
     rule.id = "rule1";
     rule.condition = "CPU_LOAD > 80%";
@@ -307,7 +331,7 @@ bool ConfigManager::restoreFromBackup() {
 
 void ConfigManager::initializeDefaults() {
     // Agent settings
-    setString("agent.ipc_port", "12345");
+    setString("agent.ipc_port", "8081");
     setString("agent.log_level", "INFO");
     setString("agent.log_file", "sysmon_agent.log");
     

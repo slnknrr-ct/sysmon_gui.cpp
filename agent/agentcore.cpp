@@ -163,49 +163,51 @@ bool AgentCore::initializeComponents() {
         logger_->warning("Failed to load configuration, using defaults");
     }
     
-    // Initialize IPC server
+    // Initialize IPC server (critical)
     ipcServer_ = std::make_unique<IpcServer>();
-    if (!ipcServer_->initialize()) {
-        logger_->error("Failed to initialize IPC server");
+    int ipcPort = configManager_->getInt("agent.ipc_port", Constants::DEFAULT_IPC_PORT);
+    if (!ipcServer_->initialize(ipcPort)) {
+        logger_->error("Failed to initialize IPC server on port " + std::to_string(ipcPort));
         return false;
     }
+    logger_->info("IPC server initialized on port " + std::to_string(ipcPort));
     
-    // Initialize system monitor
+    // Initialize system monitor with fallback
     systemMonitor_ = std::make_unique<SystemMonitor>();
     if (!systemMonitor_->initialize()) {
-        logger_->error("Failed to initialize system monitor");
-        return false;
+        logger_->warning("Failed to initialize system monitor, using fallback mode");
+        systemMonitor_->enableFallbackMode();
     }
     
-    // Initialize device manager
+    // Initialize device manager with fallback
     deviceManager_ = std::make_unique<DeviceManager>();
     if (!deviceManager_->initialize()) {
-        logger_->error("Failed to initialize device manager");
-        return false;
+        logger_->warning("Failed to initialize device manager, using fallback mode");
+        deviceManager_->enableFallbackMode();
     }
     
-    // Initialize network manager
+    // Initialize network manager with fallback
     networkManager_ = std::make_unique<NetworkManager>();
     if (!networkManager_->initialize()) {
-        logger_->error("Failed to initialize network manager");
-        return false;
+        logger_->warning("Failed to initialize network manager, using fallback mode");
+        networkManager_->enableFallbackMode();
     }
     
-    // Initialize process manager
+    // Initialize process manager with fallback
     processManager_ = std::make_unique<ProcessManager>();
     if (!processManager_->initialize()) {
-        logger_->error("Failed to initialize process manager");
-        return false;
+        logger_->warning("Failed to initialize process manager, using fallback mode");
+        processManager_->enableFallbackMode();
     }
     
-    // Initialize android manager
+    // Initialize android manager (optional)
     androidManager_ = std::make_unique<AndroidManager>();
     if (!androidManager_->initialize()) {
-        logger_->error("Failed to initialize android manager");
-        return false;
+        logger_->warning("Failed to initialize android manager, Android features disabled");
+        androidManager_.reset(); // Optional component, can be disabled
     }
     
-    // Initialize automation engine
+    // Initialize automation engine (always works)
     automationEngine_ = std::make_unique<AutomationEngine>();
     if (!automationEngine_->initialize(this)) {
         logger_->error("Failed to initialize automation engine");
@@ -220,7 +222,7 @@ bool AgentCore::initializeComponents() {
     // Set up logger
     ipcServer_->setLogger(logger_.get());
     
-    logger_->info("All components initialized successfully");
+    logger_->info("Components initialized with fallback support");
     return true;
 }
 
@@ -268,11 +270,10 @@ void AgentCore::cleanupComponents() {
     }
     
     if (logger_) {
+        logger_->info("Components cleanup complete");
         logger_->shutdown();
         logger_.reset();
     }
-    
-    logger_->info("Components cleanup complete");
 }
 
 void AgentCore::workerThread() {
@@ -346,11 +347,19 @@ Response AgentCore::handleSystemCommand(const Command& command) {
                 }
                 
                 auto info = systemMonitor_->getCurrentSystemInfo();
-                std::string serializedData = serializer_->serializeSystemInfo(info);
                 
+                // Check if in fallback mode and add special message
+                if (systemMonitor_->isFallbackMode()) {
+                    logCommand(command, "system_monitor_fallback");
+                    std::string serializedData = serializer_->serializeSystemInfo(info);
+                    Response response = createResponse(command.id, CommandStatus::SUCCESS, serializedData);
+                    response.message = "System info in fallback mode - limited functionality";
+                    return response;
+                }
+                
+                std::string serializedData = serializer_->serializeSystemInfo(info);
                 logCommand(command, "success");
-                return createResponse(command.id, CommandStatus::SUCCESS, "System info retrieved", 
-                                    {{"data", serializedData}});
+                return createResponse(command.id, CommandStatus::SUCCESS, serializedData);
             }
             
             case CommandType::GET_PROCESS_LIST: {
@@ -360,6 +369,16 @@ Response AgentCore::handleSystemCommand(const Command& command) {
                 }
                 
                 auto processes = processManager_->getProcessList();
+                
+                // Check if in fallback mode and add special message
+                if (processManager_->isFallbackMode()) {
+                    logCommand(command, "process_manager_fallback");
+                    std::string serializedData = serializer_->serializeProcessList(processes);
+                    Response response = createResponse(command.id, CommandStatus::SUCCESS, serializedData);
+                    response.message = "Process list in fallback mode - limited functionality";
+                    return response;
+                }
+                
                 std::string serializedData = serializer_->serializeProcessList(processes);
                 
                 logCommand(command, "success");
@@ -400,6 +419,13 @@ Response AgentCore::handleDeviceCommand(const Command& command) {
                     data[prefix + "serial"] = device.serialNumber;
                     data[prefix + "connected"] = device.isConnected ? "1" : "0";
                     data[prefix + "enabled"] = device.isEnabled ? "1" : "0";
+                }
+                
+                // Check if in fallback mode and add special message
+                if (deviceManager_->isFallbackMode()) {
+                    Response response = createResponse(command.id, CommandStatus::SUCCESS, "USB devices retrieved", data);
+                    response.message = "USB devices in fallback mode - limited functionality";
+                    return response;
                 }
                 
                 return createResponse(command.id, CommandStatus::SUCCESS, "USB devices retrieved", data);
@@ -471,6 +497,13 @@ Response AgentCore::handleNetworkCommand(const Command& command) {
                     data[prefix + "tx_bytes"] = std::to_string(iface.txBytes);
                     data[prefix + "rx_speed"] = std::to_string(iface.rxSpeed);
                     data[prefix + "tx_speed"] = std::to_string(iface.txSpeed);
+                }
+                
+                // Check if in fallback mode and add special message
+                if (networkManager_->isFallbackMode()) {
+                    Response response = createResponse(command.id, CommandStatus::SUCCESS, "Network interfaces retrieved", data);
+                    response.message = "Network interfaces in fallback mode - limited functionality";
+                    return response;
                 }
                 
                 return createResponse(command.id, CommandStatus::SUCCESS, "Network interfaces retrieved", data);
@@ -595,7 +628,7 @@ Response AgentCore::handleProcessCommand(const Command& command) {
 Response AgentCore::handleAndroidCommand(const Command& command) {
     try {
         if (!androidManager_) {
-            return createResponse(command.id, CommandStatus::FAILED, "Android manager not available");
+            return createResponse(command.id, CommandStatus::FAILED, "Android manager not available - ADB not found");
         }
         
         switch (command.type) {
@@ -609,12 +642,11 @@ Response AgentCore::handleAndroidCommand(const Command& command) {
                     const auto& device = devices[i];
                     std::string prefix = "android_" + std::to_string(i) + "_";
                     data[prefix + "model"] = device.model;
-                    data[prefix + "version"] = device.androidVersion;
                     data[prefix + "serial"] = device.serialNumber;
+                    data[prefix + "android_version"] = device.androidVersion;
                     data[prefix + "battery"] = std::to_string(device.batteryLevel);
                     data[prefix + "screen_on"] = device.isScreenOn ? "1" : "0";
                     data[prefix + "locked"] = device.isLocked ? "1" : "0";
-                    data[prefix + "foreground_app"] = device.foregroundApp;
                 }
                 
                 return createResponse(command.id, CommandStatus::SUCCESS, "Android devices retrieved", data);
@@ -900,6 +932,12 @@ void AgentCore::logError(const std::string& function, const std::exception& e) {
     if (logger_) {
         logger_->error("Exception in " + function + ": " + std::string(e.what()));
     }
+}
+
+Response AgentCore::createFallbackResponse(const std::string& commandId, const std::string& data, const std::string& componentName) {
+    Response response = createResponse(commandId, CommandStatus::SUCCESS, data);
+    response.message = componentName + " in fallback mode - limited functionality due to missing Windows SDK";
+    return response;
 }
 
 } // namespace SysMon

@@ -1,4 +1,5 @@
 #include "mainwindow.h"
+#include "gui_config.h"
 #include <QApplication>
 #include <QStyleFactory>
 #include <QDir>
@@ -20,6 +21,17 @@ int main(int argc, char *argv[]) {
     
     // Set application icon
     app.setWindowIcon(QIcon("../sysmon.png"));
+    
+    // Load GUI configuration
+    auto& config = SysMon::GuiConfig::getInstance();
+    std::string configFile = "sysmon_gui.conf";
+    if (!config.loadFromFile(configFile)) {
+        qDebug() << "GUI config file not found, using defaults. Created:" << QString::fromStdString(configFile);
+    } else {
+        qDebug() << "GUI configuration loaded successfully";
+        qDebug() << "Agent host:" << QString::fromStdString(config.getAgentHost());
+        qDebug() << "Agent port:" << config.getAgentPort();
+    }
     
     qDebug() << "SysMon3 GUI starting...";
     

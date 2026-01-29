@@ -25,7 +25,8 @@ namespace SysMon {
 
 DeviceManager::DeviceManager() 
     : running_(false)
-    , initialized_(false) {
+    , initialized_(false)
+    , fallbackMode_(false) {
     
 #ifndef _WIN32
     udev_ = nullptr;
@@ -206,16 +207,63 @@ void DeviceManager::scanUsbDevices() {
 std::vector<UsbDevice> DeviceManager::scanUsbDevicesLinux() {
     std::vector<UsbDevice> devices;
     
-    // Temporary simplified implementation for Windows compilation
-    UsbDevice device;
-    device.vid = "1234";
-    device.pid = "5678";
-    device.name = "Sample USB Device";
-    device.serialNumber = "ABC123";
-    device.isConnected = true;
-    device.isEnabled = true;
-    devices.push_back(device);
+    // Scan /sys/bus/usb/devices/
+    DIR* usb_dir = opendir("/sys/bus/usb/devices/");
+    if (!usb_dir) {
+        return devices;
+    }
     
+    struct dirent* entry;
+    while ((entry = readdir(usb_dir)) != nullptr) {
+        if (strncmp(entry->d_name, "usb", 3) != 0 && 
+            strncmp(entry->d_name, "1-", 2) != 0) {
+            continue;
+        }
+        
+        std::string device_path = "/sys/bus/usb/devices/" + std::string(entry->d_name);
+        
+        // Read vendor ID
+        std::ifstream vid_file(device_path + "/idVendor");
+        std::string vid;
+        if (vid_file.is_open()) {
+            std::getline(vid_file, vid);
+        }
+        
+        // Read product ID
+        std::ifstream pid_file(device_path + "/idProduct");
+        std::string pid;
+        if (pid_file.is_open()) {
+            std::getline(pid_file, pid);
+        }
+        
+        // Read manufacturer
+        std::ifstream man_file(device_path + "/manufacturer");
+        std::string manufacturer;
+        if (man_file.is_open()) {
+            std::getline(man_file, manufacturer);
+        }
+        
+        // Read product
+        std::ifstream prod_file(device_path + "/product");
+        std::string product;
+        if (prod_file.is_open()) {
+            std::getline(prod_file, product);
+        }
+        
+        if (!vid.empty() && !pid.empty()) {
+            UsbDevice device;
+            device.vid = vid;
+            device.pid = pid;
+            device.name = manufacturer.empty() ? "Unknown" : manufacturer + " " + (product.empty() ? "Device" : product);
+            device.serialNumber = "";
+            device.isConnected = true;
+            device.isEnabled = true;
+            
+            devices.push_back(device);
+        }
+    }
+    
+    closedir(usb_dir);
     return devices;
 }
 
@@ -299,10 +347,65 @@ std::vector<UsbDevice> DeviceManager::scanUsbDevicesWindows() {
 }
 
 bool DeviceManager::enableUsbDeviceLinux(const std::string& vid, const std::string& pid) {
-    (void)vid;
-    (void)pid;
-    // Temporary simplified implementation
-    return true;
+    // Find device by VID/PID
+    std::string device_path;
+    DIR* usb_dir = opendir("/sys/bus/usb/devices/");
+    if (!usb_dir) {
+        return false;
+    }
+    
+    struct dirent* entry;
+    while ((entry = readdir(usb_dir)) != nullptr) {
+        if (strncmp(entry->d_name, "usb", 3) != 0 && 
+            strncmp(entry->d_name, "1-", 2) != 0) {
+            continue;
+        }
+        
+        std::string path = "/sys/bus/usb/devices/" + std::string(entry->d_name);
+        
+        std::ifstream vid_file(path + "/idVendor");
+        std::ifstream pid_file(path + "/idProduct");
+        
+        if (vid_file.is_open() && pid_file.is_open()) {
+            std::string device_vid, device_pid;
+            std::getline(vid_file, device_vid);
+            std::getline(pid_file, device_pid);
+            
+            if (device_vid == vid && device_pid == pid) {
+                device_path = path;
+                break;
+            }
+        }
+    }
+    closedir(usb_dir);
+    
+    if (device_path.empty()) {
+        return false;
+    }
+    
+    // Enable device by writing "1" to authorize file (if available)
+    std::ofstream auth_file(device_path + "/authorized");
+    if (auth_file.is_open()) {
+        auth_file << "1";
+        return auth_file.good();
+    }
+    
+    // Alternative: try to bind device
+    std::string driver_path = device_path + "/driver";
+    if (access(driver_path.c_str(), F_OK) != 0) {
+        // Device is not bound, try to bind it
+        size_t pos = device_path.find_last_of('/');
+        if (pos != std::string::npos) {
+            std::string device_name = device_path.substr(pos + 1);
+            std::ofstream bind_file("/sys/bus/usb/drivers/usb/bind");
+            if (bind_file.is_open()) {
+                bind_file << device_name;
+                return bind_file.good();
+            }
+        }
+    }
+    
+    return false;
 }
 
 bool DeviceManager::enableUsbDeviceWindows(const std::string& vid, const std::string& pid) {
@@ -358,10 +461,65 @@ bool DeviceManager::enableUsbDeviceWindows(const std::string& vid, const std::st
 }
 
 bool DeviceManager::disableUsbDeviceLinux(const std::string& vid, const std::string& pid) {
-    (void)vid;
-    (void)pid;
-    // Temporary simplified implementation
-    return true;
+    // Find device by VID/PID
+    std::string device_path;
+    DIR* usb_dir = opendir("/sys/bus/usb/devices/");
+    if (!usb_dir) {
+        return false;
+    }
+    
+    struct dirent* entry;
+    while ((entry = readdir(usb_dir)) != nullptr) {
+        if (strncmp(entry->d_name, "usb", 3) != 0 && 
+            strncmp(entry->d_name, "1-", 2) != 0) {
+            continue;
+        }
+        
+        std::string path = "/sys/bus/usb/devices/" + std::string(entry->d_name);
+        
+        std::ifstream vid_file(path + "/idVendor");
+        std::ifstream pid_file(path + "/idProduct");
+        
+        if (vid_file.is_open() && pid_file.is_open()) {
+            std::string device_vid, device_pid;
+            std::getline(vid_file, device_vid);
+            std::getline(pid_file, device_pid);
+            
+            if (device_vid == vid && device_pid == pid) {
+                device_path = path;
+                break;
+            }
+        }
+    }
+    closedir(usb_dir);
+    
+    if (device_path.empty()) {
+        return false;
+    }
+    
+    // Disable device by writing "0" to authorize file (if available)
+    std::ofstream auth_file(device_path + "/authorized");
+    if (auth_file.is_open()) {
+        auth_file << "0";
+        return auth_file.good();
+    }
+    
+    // Alternative: try to unbind device
+    std::string driver_path = device_path + "/driver";
+    if (access(driver_path.c_str(), F_OK) == 0) {
+        // Device is bound, try to unbind it
+        size_t pos = device_path.find_last_of('/');
+        if (pos != std::string::npos) {
+            std::string device_name = device_path.substr(pos + 1);
+            std::ofstream unbind_file(driver_path + "/unbind");
+            if (unbind_file.is_open()) {
+                unbind_file << device_name;
+                return unbind_file.good();
+            }
+        }
+    }
+    
+    return false;
 }
 
 bool DeviceManager::disableUsbDeviceWindows(const std::string& vid, const std::string& pid) {
@@ -443,6 +601,21 @@ void DeviceManager::handleDeviceDisconnect(const UsbDevice& device) {
                 return dev.vid == device.vid && dev.pid == device.pid;
             }),
         usbDevices_.end());
+}
+
+// Fallback mode support
+void DeviceManager::enableFallbackMode() {
+    fallbackMode_ = true;
+    initialized_ = true;
+    
+    // Clear device list in fallback mode
+    std::lock_guard<std::shared_mutex> lock(devicesMutex_);
+    usbDevices_.clear();
+    preventedDevices_.clear();
+}
+
+bool DeviceManager::isFallbackMode() const {
+    return fallbackMode_;
 }
 
 } // namespace SysMon

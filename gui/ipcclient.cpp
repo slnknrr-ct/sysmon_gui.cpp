@@ -12,7 +12,7 @@ namespace SysMon {
 IpcClient::IpcClient(QObject* parent)
     : QObject(parent)
     , socket_(nullptr)
-    , port_(12345)
+    , port_(8081)
     , reconnecting_(false)
     , reconnectAttempts_(0)
     , connected_(false)
@@ -25,14 +25,14 @@ IpcClient::IpcClient(QObject* parent)
             this, &IpcClient::onSocketConnected);
     connect(socket_.get(), &QTcpSocket::disconnected,
             this, &IpcClient::onSocketDisconnected);
-    connect(socket_.get(), QOverload<QAbstractSocket::SocketError>::of(&QAbstractSocket::error),
+    connect(socket_.get(), &QAbstractSocket::errorOccurred,
             this, &IpcClient::onSocketError);
     connect(socket_.get(), &QTcpSocket::readyRead,
             this, &IpcClient::onSocketReadyRead);
     
     // Set up connection timer
-    connectionTimer_ = std::make_unique<QTimer>(this);
-    connect(connectionTimer_.get(), &QTimer::timeout,
+    connectionTimer_ = new QTimer(this);
+    connect(connectionTimer_, &QTimer::timeout,
             this, &IpcClient::onConnectionTimer);
 }
 
@@ -42,20 +42,51 @@ IpcClient::~IpcClient() {
 
 bool IpcClient::connectToAgent(const std::string& host, int port) {
     if (connected_) {
+        qDebug() << "Connection successful!";
         return true;
     }
     
     host_ = host;
     port_ = port;
     
+    // Debug output
+    qDebug() << "Attempting to connect to" << QString::fromStdString(host) << "port" << port;
+    
     socket_->connectToHost(QString::fromStdString(host), port);
     
     // Wait for connection (with timeout)
     if (!socket_->waitForConnected(CONNECTION_TIMEOUT)) {
         lastError_ = socket_->errorString().toStdString();
+        
+        qDebug() << "Connection failed:" << socket_->errorString();
+        
+        // Add detailed error information
+        QString detailedError = "Failed to connect to " + QString::fromStdString(host) + 
+                               ":" + QString::number(port) + " - " + socket_->errorString();
+        
+        switch (socket_->error()) {
+            case QAbstractSocket::ConnectionRefusedError:
+                detailedError += " (Connection refused - agent may not be running)";
+                break;
+            case QAbstractSocket::HostNotFoundError:
+                detailedError += " (Host not found)";
+                break;
+            case QAbstractSocket::NetworkError:
+                detailedError += " (Network error - check network connectivity)";
+                break;
+            case QAbstractSocket::SocketTimeoutError:
+                detailedError += " (Connection timeout - agent may be busy)";
+                break;
+            default:
+                detailedError += " (Error code: " + QString::number(socket_->error()) + ")";
+                break;
+        }
+        
+        lastError_ = detailedError.toStdString();
         return false;
     }
     
+    qDebug() << "Connection successful!";
     return true;
 }
 
@@ -137,7 +168,9 @@ std::string IpcClient::getLastError() const {
 }
 
 void IpcClient::onSocketConnected() {
-    connected_ = true;
+    qDebug() << "Socket connected! Sending authentication...";
+    
+    // Don't set connected_ = true yet - wait for authentication
     lastError_.clear();
     reconnectAttempts_ = 0;
     reconnecting_ = false;
@@ -147,14 +180,8 @@ void IpcClient::onSocketConnected() {
         connectionTimer_->stop();
     }
     
-    // Send pending commands
-    handlePendingCommands();
-    
-    emit connected();
-    
-    if (connectionHandler_) {
-        connectionHandler_(true);
-    }
+    // Send authentication command first
+    sendAuthenticationRequest();
 }
 
 void IpcClient::onSocketDisconnected() {
@@ -167,7 +194,7 @@ void IpcClient::onSocketDisconnected() {
         connectionHandler_(false);
     }
     
-    // Start reconnection if not manually disconnected
+    // Start reconnection if not manually disconnected and not already reconnecting
     if (!reconnecting_) {
         startReconnection();
     }
@@ -219,9 +246,29 @@ void IpcClient::onConnectionTimer() {
     }
 }
 
-void IpcClient::processReceivedData() {
-    // This method is called when data is received
-    // Actual processing is done in onSocketReadyRead
+void IpcClient::processReceivedData(const std::string& data) {
+    // Parse message from data
+    try {
+        IpcProtocol::MessageType msgType = IpcProtocol::getMessageType(data);
+        
+        switch (msgType) {
+            case IpcProtocol::MessageType::RESPONSE: {
+                Response response = IpcProtocol::deserializeResponse(data);
+                handleResponse(response);
+                break;
+            }
+            case IpcProtocol::MessageType::EVENT: {
+                Event event = IpcProtocol::deserializeEvent(data);
+                handleEvent(event);
+                break;
+            }
+            default:
+                emit errorOccurred("Unknown message type received");
+                break;
+        }
+    } catch (const std::exception& e) {
+        emit errorOccurred("Failed to parse message: " + std::string(e.what()));
+    }
 }
 
 void IpcClient::processMessage(const IpcMessage& message) {
@@ -263,6 +310,11 @@ void IpcClient::sendCommandToSocket(const Command& command) {
 void IpcClient::handlePendingCommands() {
     std::lock_guard<std::mutex> lock(commandsMutex_);
     
+    // Only send commands if authenticated
+    if (!connected_) {
+        return; // Commands will be sent after successful authentication
+    }
+    
     while (!pendingCommands_.empty()) {
         PendingCommand pending = pendingCommands_.front();
         pendingCommands_.pop();
@@ -272,7 +324,13 @@ void IpcClient::handlePendingCommands() {
 }
 
 void IpcClient::handleResponse(const Response& response) {
-    QString commandId = QString::fromStdString(response.commandId);
+    std::string commandId = response.commandId;
+    
+    // Check if this is an authentication response when not authenticated yet
+    if (!connected_) {
+        handleAuthenticationResponse(response);
+        return;
+    }
     
     // Find and remove from active commands
     std::lock_guard<std::mutex> lock(commandsMutex_);
@@ -311,6 +369,49 @@ void IpcClient::startReconnection() {
 
 std::string IpcClient::generateCommandId() {
     return std::to_string(++commandCounter_) + "_" + std::to_string(std::chrono::system_clock::now().time_since_epoch().count());
+}
+
+void IpcClient::sendAuthenticationRequest() {
+    qDebug() << "Sending authentication request...";
+    
+    Command authCommand;
+    authCommand.type = CommandType::PING;
+    authCommand.id = generateCommandId();
+    authCommand.parameters["auth_token"] = "gui_client_token"; // Simple token for now
+    
+    sendCommandToSocket(authCommand);
+    qDebug() << "Authentication request sent";
+}
+
+void IpcClient::handleAuthenticationResponse(const Response& response) {
+    qDebug() << "Received authentication response:" << QString::fromStdString(response.message);
+    
+    if (response.status == CommandStatus::SUCCESS) {
+        // Authentication successful
+        qDebug() << "Authentication successful!";
+        connected_ = true;
+        
+        // Now send pending commands
+        handlePendingCommands();
+        
+        emit connected();
+        
+        if (connectionHandler_) {
+            connectionHandler_(true);
+        }
+    } else {
+        // Authentication failed
+        qDebug() << "Authentication failed:" << QString::fromStdString(response.message);
+        connected_ = false;
+        lastError_ = response.message;
+        
+        emit errorOccurred("Authentication failed: " + response.message);
+        
+        // Disconnect
+        if (socket_) {
+            socket_->disconnectFromHost();
+        }
+    }
 }
 
 } // namespace SysMon

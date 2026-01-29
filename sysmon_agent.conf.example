@@ -7,7 +7,7 @@
 # =============================================================================
 
 # IPC server port for GUI communication
-agent.ipc_port=12345
+agent.ipc_port=8081
 
 # Log level: INFO, WARNING, ERROR
 agent.log_level=INFO

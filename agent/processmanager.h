@@ -31,6 +31,10 @@ public:
     void stop();
     void shutdown();
     
+    // Fallback mode support
+    void enableFallbackMode();
+    bool isFallbackMode() const;
+    
     // Process operations
     std::vector<ProcessInfo> getProcessList();
     bool terminateProcess(uint32_t pid);
@@ -68,12 +72,13 @@ private:
     uint32_t getParentPid(uint32_t pid);
     
     // Thread management
-    std::thread monitoringThread_;
+    std::thread processMonitoringThread_;
     std::atomic<bool> running_;
     std::atomic<bool> initialized_;
+    std::atomic<bool> fallbackMode_;
     
-    // Data storage
-    std::vector<ProcessInfo> processList_;
+    // Process storage
+    std::vector<ProcessInfo> currentProcessList_;
     std::vector<uint32_t> criticalProcesses_;
     mutable std::shared_mutex processMutex_;
     

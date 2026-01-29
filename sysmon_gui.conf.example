@@ -1,0 +1,35 @@
+# SysMon3 GUI Configuration File
+# This file contains settings for the SysMon3 GUI
+# Copy this file to sysmon_gui.conf and modify as needed
+
+# =============================================================================
+# CONNECTION SETTINGS
+# =============================================================================
+
+# Agent host and port
+gui.agent_host=localhost
+gui.agent_port=8081
+
+# Auto-connect on startup
+gui.auto_connect=true
+
+# Reconnection interval in milliseconds
+gui.reconnect_interval=5000
+
+# =============================================================================
+# GUI SETTINGS
+# =============================================================================
+
+# Window settings
+gui.window_width=1200
+gui.window_height=800
+
+# Update intervals in milliseconds
+gui.system_update_interval=1000
+gui.process_update_interval=2000
+gui.network_update_interval=3000
+gui.device_update_interval=5000
+
+# Logging
+gui.log_level=INFO
+gui.show_debug_info=false

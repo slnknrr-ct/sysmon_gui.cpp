@@ -36,7 +36,9 @@ NetworkManagerTab::NetworkManagerTab(IpcClient* ipcClient, QWidget* parent)
     connect(ipcClient_, &IpcClient::responseReceived,
             this, &NetworkManagerTab::onNetworkInterfacesResponse);
     connect(ipcClient_, &IpcClient::errorOccurred,
-            this, &NetworkManagerTab::onError);
+            this, [this](const std::string& error) {
+                onError(QString::fromStdString(error));
+            });
 }
 
 NetworkManagerTab::~NetworkManagerTab() {
@@ -257,7 +259,8 @@ void NetworkManagerTab::setupUI() {
 }
 
 void NetworkManagerTab::setupInterfaceTable() {
-    interfaceGroup_ = std::make_unique<QGroupBox("Network Interfaces");
+    interfaceGroup_ = std::make_unique<QGroupBox>();
+    interfaceGroup_->setTitle("Network Interfaces");
     interfaceLayout_ = std::make_unique<QVBoxLayout>();
     
     interfaceTable_ = std::make_unique<QTableWidget>();
@@ -272,26 +275,32 @@ void NetworkManagerTab::setupInterfaceTable() {
 }
 
 void NetworkManagerTab::setupControlButtons() {
-    controlGroup_ = std::make_unique<QGroupBox("Interface Control");
+    controlGroup_ = std::make_unique<QGroupBox>();
+    controlGroup_->setTitle("Interface Control");
     controlLayout_ = std::make_unique<QHBoxLayout>();
     
-    refreshButton_ = std::make_unique<QPushButton("Refresh");
+    refreshButton_ = std::make_unique<QPushButton>();
+    refreshButton_->setText("Refresh");
     connect(refreshButton_.get(), &QPushButton::clicked,
             this, &NetworkManagerTab::refreshInterfaces);
     
-    enableButton_ = std::make_unique<QPushButton(ENABLE_TEXT);
+    enableButton_ = std::make_unique<QPushButton>();
+    enableButton_->setText(ENABLE_TEXT);
     connect(enableButton_.get(), &QPushButton::clicked,
             this, &NetworkManagerTab::enableInterface);
     
-    disableButton_ = std::make_unique<QPushButton(DISABLE_TEXT);
+    disableButton_ = std::make_unique<QPushButton>();
+    disableButton_->setText(DISABLE_TEXT);
     connect(disableButton_.get(), &QPushButton::clicked,
             this, &NetworkManagerTab::disableInterface);
     
-    staticIpButton_ = std::make_unique<QPushButton(STATIC_IP_TEXT);
+    staticIpButton_ = std::make_unique<QPushButton>();
+    staticIpButton_->setText(STATIC_IP_TEXT);
     connect(staticIpButton_.get(), &QPushButton::clicked,
             this, &NetworkManagerTab::setStaticIp);
     
-    dhcpButton_ = std::make_unique<QPushButton(DHCP_IP_TEXT);
+    dhcpButton_ = std::make_unique<QPushButton>();
+    dhcpButton_->setText(DHCP_IP_TEXT);
     connect(dhcpButton_.get(), &QPushButton::clicked,
             this, &NetworkManagerTab::setDhcpIp);
     
@@ -308,8 +317,10 @@ void NetworkManagerTab::setupControlButtons() {
 void NetworkManagerTab::setupStatusBar() {
     auto statusLayout = std::make_unique<QHBoxLayout>();
     
-    statusLabel_ = std::make_unique<QLabel("Ready");
-    interfaceCountLabel_ = std::make_unique<QLabel("Interfaces: 0");
+    statusLabel_ = std::make_unique<QLabel>();
+    statusLabel_->setText("Ready");
+    interfaceCountLabel_ = std::make_unique<QLabel>();
+    interfaceCountLabel_->setText("Interfaces: 0");
     
     statusLayout->addWidget(statusLabel_.get());
     statusLayout->addStretch();

@@ -31,7 +31,7 @@ public:
     ~IpcClient();
     
     // Connection management
-    bool connectToAgent(const std::string& host = "localhost", int port = 12345);
+    bool connectToAgent(const std::string& host = "localhost", int port = 8081);
     void disconnectFromAgent();
     bool isConnected() const;
     
@@ -69,10 +69,13 @@ private slots:
     void onSocketError(QAbstractSocket::SocketError error);
     void onSocketReadyRead();
     void onConnectionTimer();
+    
+    // Connection management
+    void startReconnection();
 
 private:
     // Message processing
-    void processReceivedData();
+    void processReceivedData(const std::string& data);
     void processMessage(const IpcMessage& message);
     
     // Command management
@@ -136,7 +139,7 @@ private:
     std::atomic<uint64_t> commandCounter_;
     
     // Constants
-    static constexpr int CONNECTION_TIMEOUT = 5000; // 5 seconds
+    static constexpr int CONNECTION_TIMEOUT = 15000; // 15 seconds
     static constexpr int RECONNECT_INTERVAL = 3000; // 3 seconds
     static constexpr int MAX_RECONNECT_ATTEMPTS = 10;
     static constexpr int COMMAND_TIMEOUT = 10000; // 10 seconds

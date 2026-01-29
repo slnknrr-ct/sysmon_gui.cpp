@@ -35,7 +35,9 @@ ProcessManagerTab::ProcessManagerTab(IpcClient* ipcClient, QWidget* parent)
     connect(ipcClient_, &IpcClient::responseReceived,
             this, &ProcessManagerTab::onProcessListResponse);
     connect(ipcClient_, &IpcClient::errorOccurred,
-            this, &ProcessManagerTab::onError);
+            this, [this](const std::string& error) {
+                onError(QString::fromStdString(error));
+            });
 }
 
 ProcessManagerTab::~ProcessManagerTab() {
@@ -244,14 +246,17 @@ void ProcessManagerTab::setupUI() {
 }
 
 void ProcessManagerTab::setupSearchBar() {
-    searchGroup_ = std::make_unique<QGroupBox("Search");
+    searchGroup_ = std::make_unique<QGroupBox>();
+    searchGroup_->setTitle("Search");
     searchLayout_ = std::make_unique<QHBoxLayout>();
     
-    searchLabel_ = std::make_unique<QLabel("Filter:");
+    searchLabel_ = std::make_unique<QLabel>();
+    searchLabel_->setText("Filter:");
     searchEdit_ = std::make_unique<QLineEdit>();
     searchEdit_->setPlaceholderText("Enter process name to filter...");
     
-    clearSearchButton_ = std::make_unique<QPushButton("Clear");
+    clearSearchButton_ = std::make_unique<QPushButton>();
+    clearSearchButton_->setText("Clear");
     
     // Connect search signals
     connect(searchEdit_.get(), &QLineEdit::textChanged,
@@ -267,7 +272,8 @@ void ProcessManagerTab::setupSearchBar() {
 }
 
 void ProcessManagerTab::setupProcessTable() {
-    processGroup_ = std::make_unique<QGroupBox("Processes");
+    processGroup_ = std::make_unique<QGroupBox>();
+    processGroup_->setTitle("Processes");
     processLayout_ = std::make_unique<QVBoxLayout>();
     
     processTable_ = std::make_unique<QTableWidget>();
@@ -282,18 +288,22 @@ void ProcessManagerTab::setupProcessTable() {
 }
 
 void ProcessManagerTab::setupControlButtons() {
-    controlGroup_ = std::make_unique<QGroupBox("Process Control");
+    controlGroup_ = std::make_unique<QGroupBox>();
+    controlGroup_->setTitle("Process Control");
     controlLayout_ = std::make_unique<QHBoxLayout>();
     
-    refreshButton_ = std::make_unique<QPushButton("Refresh");
+    refreshButton_ = std::make_unique<QPushButton>();
+    refreshButton_->setText("Refresh");
     connect(refreshButton_.get(), &QPushButton::clicked,
             this, &ProcessManagerTab::refreshProcesses);
     
-    terminateButton_ = std::make_unique<QPushButton(TERMINATE_TEXT);
+    terminateButton_ = std::make_unique<QPushButton>();
+    terminateButton_->setText(TERMINATE_TEXT);
     connect(terminateButton_.get(), &QPushButton::clicked,
             this, &ProcessManagerTab::terminateProcess);
     
-    killButton_ = std::make_unique<QPushButton(KILL_TEXT);
+    killButton_ = std::make_unique<QPushButton>();
+    killButton_->setText(KILL_TEXT);
     connect(killButton_.get(), &QPushButton::clicked,
             this, &ProcessManagerTab::killProcess);
     
@@ -308,8 +318,10 @@ void ProcessManagerTab::setupControlButtons() {
 void ProcessManagerTab::setupStatusBar() {
     auto statusLayout = std::make_unique<QHBoxLayout>();
     
-    statusLabel_ = std::make_unique<QLabel("Ready");
-    processCountLabel_ = std::make_unique<QLabel("Processes: 0");
+    statusLabel_ = std::make_unique<QLabel>();
+    statusLabel_->setText("Ready");
+    processCountLabel_ = std::make_unique<QLabel>();
+    processCountLabel_->setText("Processes: 0");
     
     statusLayout->addWidget(statusLabel_.get());
     statusLayout->addStretch();

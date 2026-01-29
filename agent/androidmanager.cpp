@@ -48,6 +48,13 @@ bool AndroidManager::initialize() {
     
     // Check if ADB is available
     if (!isAdbAvailable()) {
+        std::cerr << "ADB not found at: " << adbPath_ << std::endl;
+        std::cerr << "Please ensure Android SDK Platform-Tools are installed and ADB is in PATH" << std::endl;
+        std::cerr << "Common ADB locations:" << std::endl;
+        std::cerr << "  - C:\\Users\\%USERNAME%\\AppData\\Local\\Android\\Sdk\\platform-tools\\adb.exe" << std::endl;
+        std::cerr << "  - C:\\Android\\platform-tools\\adb.exe" << std::endl;
+        std::cerr << "  - /usr/bin/adb" << std::endl;
+        std::cerr << "  - /usr/local/bin/adb" << std::endl;
         return false;
     }
     

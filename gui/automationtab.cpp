@@ -47,7 +47,9 @@ AutomationTab::AutomationTab(IpcClient* ipcClient, QWidget* parent)
                 }
             });
     connect(ipcClient_, &IpcClient::errorOccurred,
-            this, &AutomationTab::onError);
+            this, [this](const std::string& error) {
+                onError(QString::fromStdString(error));
+            });
 }
 
 AutomationTab::~AutomationTab() {
@@ -268,7 +270,8 @@ void AutomationTab::setupUI() {
 }
 
 void AutomationTab::setupRuleTable() {
-    ruleGroup_ = std::make_unique<QGroupBox("Automation Rules");
+    ruleGroup_ = std::make_unique<QGroupBox>();
+    ruleGroup_->setTitle("Automation Rules");
     ruleLayout_ = std::make_unique<QVBoxLayout>();
     
     ruleTable_ = std::make_unique<QTableWidget>();
@@ -283,30 +286,37 @@ void AutomationTab::setupRuleTable() {
 }
 
 void AutomationTab::setupControlButtons() {
-    controlGroup_ = std::make_unique<QGroupBox("Rule Control");
+    controlGroup_ = std::make_unique<QGroupBox>();
+    controlGroup_->setTitle("Rule Control");
     controlLayout_ = std::make_unique<QHBoxLayout>();
     
-    refreshButton_ = std::make_unique<QPushButton("Refresh");
+    refreshButton_ = std::make_unique<QPushButton>();
+    refreshButton_->setText("Refresh");
     connect(refreshButton_.get(), &QPushButton::clicked,
             this, &AutomationTab::refreshRules);
     
-    addButton_ = std::make_unique<QPushButton(ADD_TEXT);
+    addButton_ = std::make_unique<QPushButton>();
+    addButton_->setText(ADD_TEXT);
     connect(addButton_.get(), &QPushButton::clicked,
             this, &AutomationTab::addRule);
     
-    editButton_ = std::make_unique<QPushButton(EDIT_TEXT);
+    editButton_ = std::make_unique<QPushButton>();
+    editButton_->setText(EDIT_TEXT);
     connect(editButton_.get(), &QPushButton::clicked,
             this, &AutomationTab::editRule);
     
-    deleteButton_ = std::make_unique<QPushButton(DELETE_TEXT);
+    deleteButton_ = std::make_unique<QPushButton>();
+    deleteButton_->setText(DELETE_TEXT);
     connect(deleteButton_.get(), &QPushButton::clicked,
             this, &AutomationTab::deleteRule);
     
-    enableButton_ = std::make_unique<QPushButton(ENABLE_TEXT);
+    enableButton_ = std::make_unique<QPushButton>();
+    enableButton_->setText(ENABLE_TEXT);
     connect(enableButton_.get(), &QPushButton::clicked,
             this, &AutomationTab::enableRule);
     
-    disableButton_ = std::make_unique<QPushButton(DISABLE_TEXT);
+    disableButton_ = std::make_unique<QPushButton>();
+    disableButton_->setText(DISABLE_TEXT);
     connect(disableButton_.get(), &QPushButton::clicked,
             this, &AutomationTab::disableRule);
     
@@ -324,8 +334,10 @@ void AutomationTab::setupControlButtons() {
 void AutomationTab::setupStatusBar() {
     auto statusLayout = std::make_unique<QHBoxLayout>();
     
-    statusLabel_ = std::make_unique<QLabel("Ready");
-    ruleCountLabel_ = std::make_unique<QLabel("Rules: 0");
+    statusLabel_ = std::make_unique<QLabel>();
+    statusLabel_->setText("Ready");
+    ruleCountLabel_ = std::make_unique<QLabel>();
+    ruleCountLabel_->setText("Rules: 0");
     
     statusLayout->addWidget(statusLabel_.get());
     statusLayout->addStretch();
@@ -452,7 +464,7 @@ void AutomationTab::showRuleDialog(AutomationRule* rule) {
             if (rule) {
                 // Update existing rule
                 newRule.id = rule->id;
-                Command updateCommand = createCommand(CommandType::UPDATE_AUTOMATION_RULE, Module::AUTOMATION);
+                Command updateCommand = createCommand(CommandType::ADD_AUTOMATION_RULE, Module::AUTOMATION);
                 updateCommand.parameters["rule_id"] = newRule.id;
                 updateCommand.parameters["condition"] = newRule.condition;
                 updateCommand.parameters["action"] = newRule.action;
@@ -460,14 +472,10 @@ void AutomationTab::showRuleDialog(AutomationRule* rule) {
                 updateCommand.parameters["duration"] = std::to_string(newRule.duration.count());
                 
                 // Send update command
-                sendCommand(updateCommand, [this](const Response& response) {
-                    if (response.status == CommandStatus::SUCCESS) {
-                        showStatusMessage("Rule updated successfully");
-                        refreshRules();
-                    } else {
-                        onError(QString("Failed to update rule: %1").arg(QString::fromStdString(response.message)));
-                    }
-                });
+                ipcClient_->sendCommand(updateCommand);
+                statusLabel_->setText("Rule updated successfully");
+                statusLabel_->setStyleSheet("color: green;");
+                refreshRules();
             } else {
                 // Add new rule
                 Command command = createCommand(CommandType::ADD_AUTOMATION_RULE, Module::AUTOMATION);
@@ -498,7 +506,8 @@ void AutomationTab::createRuleDialog() {
     actionEdit_ = std::make_unique<QLineEdit>();
     enabledCheckBox_ = std::make_unique<QCheckBox>();
     durationEdit_ = std::make_unique<QLineEdit>();
-    durationLabel_ = std::make_unique<QLabel("Duration (seconds):");
+    durationLabel_ = std::make_unique<QLabel>();
+    durationLabel_->setText("Duration (seconds):");
     
     dialogLayout_->addRow("Condition:", conditionEdit_.get());
     dialogLayout_->addRow("Action:", actionEdit_.get());
@@ -545,22 +554,22 @@ AutomationRule AutomationTab::createRuleFromDialog() const {
 
 bool AutomationTab::validateRule(const AutomationRule& rule) const {
     if (rule.condition.empty()) {
-        QMessageBox::warning(this, "Invalid Rule", "Condition cannot be empty.");
+        QMessageBox::warning(const_cast<AutomationTab*>(this), "Invalid Rule", "Condition cannot be empty.");
         return false;
     }
     
     if (rule.action.empty()) {
-        QMessageBox::warning(this, "Invalid Rule", "Action cannot be empty.");
+        QMessageBox::warning(const_cast<AutomationTab*>(this), "Invalid Rule", "Action cannot be empty.");
         return false;
     }
     
     if (!isValidCondition(rule.condition)) {
-        QMessageBox::warning(this, "Invalid Rule", "Condition format is invalid.");
+        QMessageBox::warning(const_cast<AutomationTab*>(this), "Invalid Rule", "Condition format is invalid.");
         return false;
     }
     
     if (!isValidAction(rule.action)) {
-        QMessageBox::warning(this, "Invalid Rule", "Action format is invalid.");
+        QMessageBox::warning(const_cast<AutomationTab*>(this), "Invalid Rule", "Action format is invalid.");
         return false;
     }
     

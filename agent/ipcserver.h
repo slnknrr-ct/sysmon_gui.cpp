@@ -57,7 +57,7 @@ public:
     ~IpcServer();
     
     // Server lifecycle
-    bool initialize(int port = 12345);
+    bool initialize(int port = 8081);
     bool start();
     void stop();
     void shutdown();

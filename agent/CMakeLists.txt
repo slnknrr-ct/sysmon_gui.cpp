@@ -67,7 +67,7 @@ endif()
 # Set target properties
 set_target_properties(sysmon_agent PROPERTIES
     OUTPUT_NAME "sysmon_agent"
-    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/dist/bin
 )
 
 # Add compile definitions

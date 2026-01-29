@@ -41,6 +41,10 @@ public:
     void stop();
     void shutdown();
     
+    // Fallback mode support
+    void enableFallbackMode();
+    bool isFallbackMode() const;
+    
     // Network interface operations
     std::vector<NetworkInterface> getNetworkInterfaces();
     bool enableInterface(const std::string& interfaceName);
@@ -79,6 +83,7 @@ private:
     std::thread monitoringThread_;
     std::atomic<bool> running_;
     std::atomic<bool> initialized_;
+    std::atomic<bool> fallbackMode_;
     
     // Data storage
     std::vector<NetworkInterface> interfaces_;

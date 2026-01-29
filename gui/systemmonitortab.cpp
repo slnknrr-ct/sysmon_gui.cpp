@@ -8,6 +8,9 @@
 #include <QTableWidget>
 #include <QListWidget>
 #include <QTimer>
+#include <QStatusBar>
+#include <sstream>
+#include <algorithm>
 #include <QGroupBox>
 #include <QScrollArea>
 #include <QHeaderView>
@@ -190,7 +193,7 @@ void SystemMonitorTab::onProcessListResponse(const Response& response) {
     std::vector<ProcessInfo> processes;
     
     // Expected format: "pid,name,cpu,memory,status,parent,user;pid2,name2,..."
-    std::string processData = response.data.count("processes") ? response.data["processes"] : "";
+    std::string processData = response.data.count("processes") ? response.data.at("processes") : "";
     
     if (!processData.empty()) {
         std::istringstream processStream(processData);

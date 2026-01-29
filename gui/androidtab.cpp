@@ -13,9 +13,11 @@
 #include <QTextEdit>
 #include <QProgressBar>
 #include <QDialog>
+#include <QListWidgetItem>
 #include <QFormLayout>
 #include <QDialogButtonBox>
 #include <QPixmap>
+#include <QTableWidgetItem>
 #include <QShowEvent>
 #include <QHideEvent>
 #include <QMessageBox>
@@ -62,7 +64,9 @@ AndroidTab::AndroidTab(IpcClient* ipcClient, QWidget* parent)
                 }
             });
     connect(ipcClient_, &IpcClient::errorOccurred,
-            this, &AndroidTab::onError);
+            this, [this](const std::string& error) {
+                onError(QString::fromStdString(error));
+            });
 }
 
 AndroidTab::~AndroidTab() {
@@ -344,10 +348,9 @@ void AndroidTab::onAndroidDevicesResponse(const Response& response) {
     
     // If no devices, show appropriate message
     if (devices.empty()) {
-        deviceListWidget_->clear();
-        QListWidgetItem* noDeviceItem = new QListWidgetItem("No Android devices connected");
-        noDeviceItem->setForeground(Qt::gray);
-        deviceListWidget_->addItem(noDeviceItem);
+        // Show no device message in device combo
+        deviceCombo_->clear();
+        deviceCombo_->addItem("No Android devices connected");
         return;
     }
     
@@ -409,8 +412,8 @@ void AndroidTab::onDeviceInfoResponse(const Response& response) {
         return;
     }
     
-    currentDeviceInfo_ = device;
-    updateDeviceInfo(device);
+    // Device info was already parsed and updated in the try block above
+    // No need to update again here
 }
 
 void AndroidTab::onAppListResponse(const Response& response) {
@@ -446,10 +449,10 @@ void AndroidTab::onAppListResponse(const Response& response) {
     
     // If no apps, show appropriate message
     if (apps.empty()) {
-        appListWidget_->clear();
-        QListWidgetItem* noAppsItem = new QListWidgetItem("No apps found on device");
-        noAppsItem->setForeground(Qt::gray);
-        appListWidget_->addItem(noAppsItem);
+        // Show no apps message in app table
+        appTable_->setRowCount(1);
+        appTable_->setColumnCount(1);
+        appTable_->setItem(0, 0, new QTableWidgetItem("No apps found on device"));
         currentApps_.clear();
         return;
     }
@@ -547,9 +550,9 @@ void AndroidTab::onLogcatResponse(const Response& response) {
     
     // If no logcat, show appropriate message
     if (logcat.empty()) {
-        logcatTextEdit_->clear();
-        logcatTextEdit_->append("No log data available from device");
-        logcatTextEdit_->append("Make sure the device is connected and ADB debugging is enabled");
+        logcatEdit_->clear();
+        logcatEdit_->append("No log data available from device");
+        logcatEdit_->append("Make sure the device is connected and ADB debugging is enabled");
         return;
     }
     
@@ -581,12 +584,15 @@ void AndroidTab::setupUI() {
 }
 
 void AndroidTab::setupDeviceSection() {
-    deviceGroup_ = std::make_unique<QGroupBox("Device Selection");
+    deviceGroup_ = std::make_unique<QGroupBox>();
+    deviceGroup_->setTitle("Device Selection");
     deviceLayout_ = std::make_unique<QHBoxLayout>();
     
-    deviceLabel_ = std::make_unique<QLabel("Device:");
+    deviceLabel_ = std::make_unique<QLabel>();
+    deviceLabel_->setText("Device:");
     deviceCombo_ = std::make_unique<QComboBox>();
-    refreshDevicesButton_ = std::make_unique<QPushButton("Refresh");
+    refreshDevicesButton_ = std::make_unique<QPushButton>();
+    refreshDevicesButton_->setText("Refresh");
     
     // Connect signals
     connect(deviceCombo_.get(), QOverload<int>::of(&QComboBox::currentIndexChanged),
@@ -603,17 +609,25 @@ void AndroidTab::setupDeviceSection() {
 }
 
 void AndroidTab::setupDeviceInfoSection() {
-    infoGroup_ = std::make_unique<QGroupBox("Device Information");
+    infoGroup_ = std::make_unique<QGroupBox>();
+    infoGroup_->setTitle("Device Information");
     infoLayout_ = std::make_unique<QFormLayout>();
     
-    modelLabel_ = std::make_unique<QLabel("Unknown");
-    versionLabel_ = std::make_unique<QLabel("Unknown");
-    serialLabel_ = std::make_unique<QLabel("Unknown");
-    batteryLabel_ = std::make_unique<QLabel("Unknown");
+    modelLabel_ = std::make_unique<QLabel>();
+    modelLabel_->setText("Unknown");
+    versionLabel_ = std::make_unique<QLabel>();
+    versionLabel_->setText("Unknown");
+    serialLabel_ = std::make_unique<QLabel>();
+    serialLabel_->setText("Unknown");
+    batteryLabel_ = std::make_unique<QLabel>();
+    batteryLabel_->setText("Unknown");
     batteryBar_ = std::make_unique<QProgressBar>();
-    screenLabel_ = std::make_unique<QLabel("Unknown");
-    lockLabel_ = std::make_unique<QLabel("Unknown");
-    foregroundLabel_ = std::make_unique<QLabel("Unknown");
+    screenLabel_ = std::make_unique<QLabel>();
+    screenLabel_->setText("Unknown");
+    lockLabel_ = std::make_unique<QLabel>();
+    lockLabel_->setText("Unknown");
+    foregroundLabel_ = std::make_unique<QLabel>();
+    foregroundLabel_->setText("Unknown");
     
     infoLayout_->addRow("Model:", modelLabel_.get());
     infoLayout_->addRow("Android Version:", versionLabel_.get());
@@ -628,13 +642,18 @@ void AndroidTab::setupDeviceInfoSection() {
 }
 
 void AndroidTab::setupDeviceControlSection() {
-    controlGroup_ = std::make_unique<QGroupBox("Device Control");
+    controlGroup_ = std::make_unique<QGroupBox>();
+    controlGroup_->setTitle("Device Control");
     controlLayout_ = std::make_unique<QHBoxLayout>();
     
-    screenOnButton_ = std::make_unique<QPushButton("Screen On");
-    screenOffButton_ = std::make_unique<QPushButton("Screen Off");
-    lockButton_ = std::make_unique<QPushButton("Lock Device");
-    refreshInfoButton_ = std::make_unique<QPushButton("Refresh Info");
+    screenOnButton_ = std::make_unique<QPushButton>();
+    screenOnButton_->setText("Screen On");
+    screenOffButton_ = std::make_unique<QPushButton>();
+    screenOffButton_->setText("Screen Off");
+    lockButton_ = std::make_unique<QPushButton>();
+    lockButton_->setText("Lock Device");
+    refreshInfoButton_ = std::make_unique<QPushButton>();
+    refreshInfoButton_->setText("Refresh Info");
     
     // Connect signals
     connect(screenOnButton_.get(), &QPushButton::clicked,
@@ -656,16 +675,20 @@ void AndroidTab::setupDeviceControlSection() {
 }
 
 void AndroidTab::setupAppManagementSection() {
-    appGroup_ = std::make_unique<QGroupBox("App Management");
+    appGroup_ = std::make_unique<QGroupBox>();
+    appGroup_->setTitle("App Management");
     appLayout_ = std::make_unique<QVBoxLayout>();
     
     // App control row
     appControlLayout_ = std::make_unique<QHBoxLayout>();
-    refreshAppsButton_ = std::make_unique<QPushButton("Refresh Apps");
+    refreshAppsButton_ = std::make_unique<QPushButton>();
+    refreshAppsButton_->setText("Refresh Apps");
     appEdit_ = std::make_unique<QLineEdit>();
     appEdit_->setPlaceholderText("Package name (e.g., com.example.app)");
-    launchAppButton_ = std::make_unique<QPushButton("Launch");
-    stopAppButton_ = std::make_unique<QPushButton("Stop");
+    launchAppButton_ = std::make_unique<QPushButton>();
+    launchAppButton_->setText("Launch");
+    stopAppButton_ = std::make_unique<QPushButton>();
+    stopAppButton_->setText("Stop");
     
     // Connect signals
     connect(refreshAppsButton_.get(), &QPushButton::clicked,
@@ -694,12 +717,16 @@ void AndroidTab::setupAppManagementSection() {
 }
 
 void AndroidTab::setupSystemOperationsSection() {
-    systemGroup_ = std::make_unique<QGroupBox("System Operations");
+    systemGroup_ = std::make_unique<QGroupBox>();
+    systemGroup_->setTitle("System Operations");
     systemLayout_ = std::make_unique<QHBoxLayout>();
     
-    screenshotButton_ = std::make_unique<QPushButton("Screenshot");
-    orientationButton_ = std::make_unique<QPushButton("Get Orientation");
-    logcatButton_ = std::make_unique<QPushButton("Get Logcat");
+    screenshotButton_ = std::make_unique<QPushButton>();
+    screenshotButton_->setText("Screenshot");
+    orientationButton_ = std::make_unique<QPushButton>();
+    orientationButton_->setText("Get Orientation");
+    logcatButton_ = std::make_unique<QPushButton>();
+    logcatButton_->setText("Get Logcat");
     
     // Connect signals
     connect(screenshotButton_.get(), &QPushButton::clicked,
@@ -720,8 +747,10 @@ void AndroidTab::setupSystemOperationsSection() {
 void AndroidTab::setupStatusBar() {
     auto statusLayout = std::make_unique<QHBoxLayout>();
     
-    statusLabel_ = std::make_unique<QLabel("Ready");
-    deviceCountLabel_ = std::make_unique<QLabel("Devices: 0");
+    statusLabel_ = std::make_unique<QLabel>();
+    statusLabel_->setText("Ready");
+    deviceCountLabel_ = std::make_unique<QLabel>();
+    deviceCountLabel_->setText("Devices: 0");
     
     statusLayout->addWidget(statusLabel_.get());
     statusLayout->addStretch();
@@ -868,7 +897,7 @@ void AndroidTab::createScreenshotDialog() {
     
     auto layout = std::make_unique<QVBoxLayout>(screenshotDialog_.get());
     
-    screenshotLabel_ = std::make_unique<QLabel();
+    screenshotLabel_ = std::make_unique<QLabel>();
     screenshotLabel_->setAlignment(Qt::AlignCenter);
     
     auto closeButton = std::make_unique<QPushButton>("Close");

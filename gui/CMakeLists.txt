@@ -4,6 +4,7 @@ set(GUI_SOURCES
     main.cpp
     mainwindow.cpp
     ipcclient.cpp
+    gui_config.cpp
     systemmonitortab.cpp
     devicemanagertab.cpp
     networkmanagertab.cpp
@@ -16,6 +17,7 @@ set(GUI_SOURCES
 set(GUI_HEADERS
     mainwindow.h
     ipcclient.h
+    gui_config.h
     systemmonitortab.h
     devicemanagertab.h
     networkmanagertab.h
@@ -69,7 +71,7 @@ set_target_properties(sysmon_gui PROPERTIES
     WIN32_EXECUTABLE TRUE
     MACOSX_BUNDLE TRUE
     OUTPUT_NAME "sysmon_gui"
-    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/dist/bin
 )
 
 # Add compile definitions
@@ -84,9 +86,7 @@ if(SYSMON_NO_OPENSSL)
 endif()
 
 # Qt-specific settings
-set_target_properties(sysmon_gui PROPERTIES
-    QT_MOC_SKIP ${GUI_HEADERS}
-)
+# MOC is automatically handled by CMAKE_AUTOMOC
 
 # Installation
 install(TARGETS sysmon_gui
@@ -115,10 +115,17 @@ endif()
 
 # Windows-specific settings
 if(WIN32)
-    # Set subsystem to Windows
-    set_target_properties(sysmon_gui PROPERTIES
-        LINK_FLAGS "/SUBSYSTEM:WINDOWS"
-    )
+    # Set subsystem to Windows (MinGW compatible)
+    if(MSVC)
+        set_target_properties(sysmon_gui PROPERTIES
+            LINK_FLAGS "/SUBSYSTEM:WINDOWS"
+        )
+    else()
+        # MinGW uses different syntax
+        set_target_properties(sysmon_gui PROPERTIES
+            LINK_FLAGS "-Wl,--subsystem,windows"
+        )
+    endif()
     
     # Add Windows manifest
     if(MSVC)

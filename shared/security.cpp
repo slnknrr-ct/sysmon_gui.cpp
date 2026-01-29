@@ -67,6 +67,24 @@ std::string SecurityManager::generateClientToken() {
 bool SecurityManager::authenticateClient(const std::string& clientId, const std::string& token) {
     std::lock_guard<std::mutex> lock(clientsMutex_);
     
+    // Special case: allow predefined GUI token
+    if (token == "gui_client_token") {
+        // Create or update client with GUI token
+        auto it = authenticatedClients_.find(clientId);
+        if (it == authenticatedClients_.end()) {
+            auto client = std::make_unique<ClientAuth>(clientId, token);
+            client->isAuthenticated = true;
+            client->lastActivity = std::chrono::steady_clock::now();
+            authenticatedClients_[clientId] = std::move(client);
+        } else {
+            auto& client = it->second;
+            client->isAuthenticated = true;
+            client->lastActivity = std::chrono::steady_clock::now();
+        }
+        return true;
+    }
+    
+    // Normal token authentication
     auto it = authenticatedClients_.find(clientId);
     if (it == authenticatedClients_.end()) {
         return false;

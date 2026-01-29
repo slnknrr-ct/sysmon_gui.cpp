@@ -24,6 +24,10 @@ public:
     void stop();
     void shutdown();
     
+    // Fallback mode support
+    void enableFallbackMode();
+    bool isFallbackMode() const;
+    
     // USB device operations
     std::vector<UsbDevice> getUsbDevices();
     bool enableUsbDevice(const std::string& vid, const std::string& pid);
@@ -54,6 +58,7 @@ private:
     std::thread monitoringThread_;
     std::atomic<bool> running_;
     std::atomic<bool> initialized_;
+    std::atomic<bool> fallbackMode_;
     
     // Device storage
     std::vector<UsbDevice> usbDevices_;

@@ -1,4 +1,5 @@
 #include "mainwindow.h"
+#include "gui_config.h"
 #include <QApplication>
 #include <QMenuBar>
 #include <QStatusBar>
@@ -49,8 +50,11 @@ MainWindow::MainWindow(QWidget *parent)
     setWindowTitle(WINDOW_TITLE);
     resize(1200, 800);
     
-    // Try to connect to agent automatically
-    QTimer::singleShot(1000, this, &MainWindow::connectToAgent);
+    // Try to connect to agent automatically if enabled
+    auto& config = GuiConfig::getInstance();
+    if (config.getBool("gui.auto_connect", true)) {
+        QTimer::singleShot(1000, this, &MainWindow::connectToAgent);
+    }
 }
 
 MainWindow::~MainWindow() {
@@ -117,6 +121,51 @@ void MainWindow::onConnectionStatusChanged(bool connected) {
     
     if (connected) {
         showStatusMessage("Connected to agent");
+        
+        // Refresh data on all tabs when connected
+        if (systemMonitorTab_) {
+            QTimer::singleShot(100, this, [this]() {
+                if (systemMonitorTab_) {
+                    QMetaObject::invokeMethod(systemMonitorTab_.get(), "updateSystemInfo", Qt::QueuedConnection);
+                    QMetaObject::invokeMethod(systemMonitorTab_.get(), "updateProcessList", Qt::QueuedConnection);
+                }
+            });
+        }
+        if (processManagerTab_) {
+            QTimer::singleShot(100, this, [this]() {
+                if (processManagerTab_) {
+                    QMetaObject::invokeMethod(processManagerTab_.get(), "refreshProcesses", Qt::QueuedConnection);
+                }
+            });
+        }
+        if (networkManagerTab_) {
+            QTimer::singleShot(100, this, [this]() {
+                if (networkManagerTab_) {
+                    QMetaObject::invokeMethod(networkManagerTab_.get(), "updateNetworkInterfaces", Qt::QueuedConnection);
+                }
+            });
+        }
+        if (deviceManagerTab_) {
+            QTimer::singleShot(100, this, [this]() {
+                if (deviceManagerTab_) {
+                    QMetaObject::invokeMethod(deviceManagerTab_.get(), "updateDeviceList", Qt::QueuedConnection);
+                }
+            });
+        }
+        if (androidTab_) {
+            QTimer::singleShot(100, this, [this]() {
+                if (androidTab_) {
+                    QMetaObject::invokeMethod(androidTab_.get(), "updateDeviceList", Qt::QueuedConnection);
+                }
+            });
+        }
+        if (automationTab_) {
+            QTimer::singleShot(100, this, [this]() {
+                if (automationTab_) {
+                    QMetaObject::invokeMethod(automationTab_.get(), "updateRuleList", Qt::QueuedConnection);
+                }
+            });
+        }
     } else {
         showStatusMessage("Disconnected from agent");
     }
@@ -128,7 +177,16 @@ void MainWindow::onAgentStatusChanged(const std::string& status) {
 }
 
 void MainWindow::onErrorOccurred(const std::string& error) {
-    showStatusMessage("Error: " + error, 5000);
+    // Check if this is an authentication error
+    if (error.find("Authentication") != std::string::npos) {
+        showStatusMessage("Authentication failed: " + error, 8000);
+        updateConnectionStatus(false);
+    } else if (error.find("Connection") != std::string::npos) {
+        showStatusMessage("Connection error: " + error, 8000);
+        updateConnectionStatus(false);
+    } else {
+        showStatusMessage("Error: " + error, 5000);
+    }
 }
 
 void MainWindow::setupUI() {
@@ -246,15 +304,23 @@ void MainWindow::connectToAgent() {
     }
     
     if (isConnected_) {
+        showStatusMessage("Already connected to agent");
         return;
     }
     
-    showStatusMessage("Connecting to agent...");
+    // Use already loaded configuration
+    auto& config = GuiConfig::getInstance();
     
-    if (ipcClient_->connectToAgent("localhost", 12345)) {
-        // Connection initiated
+    std::string host = config.getAgentHost();
+    int port = config.getAgentPort();
+    
+    showStatusMessage("Connecting to agent at " + host + ":" + std::to_string(port) + "...");
+    
+    if (!ipcClient_->connectToAgent(host, port)) {
+        showStatusMessage("Failed to initiate connection to agent: " + ipcClient_->getLastError(), 5000);
     } else {
-        showStatusMessage("Failed to initiate connection to agent");
+        // Connection initiated, wait for authentication result
+        showStatusMessage("Connection initiated, waiting for authentication...");
     }
 }
 

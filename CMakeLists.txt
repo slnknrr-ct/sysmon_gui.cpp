@@ -1,9 +1,17 @@
 cmake_minimum_required(VERSION 3.16)
 project(SysMon3 VERSION 1.0.0 LANGUAGES CXX)
 
-# Set C++ standard
+# Require C++17 for filesystem and other features
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
+# Platform-specific settings
+if(WIN32)
+    add_definitions(-DWIN32_LEAN_AND_MEAN)
+    add_definitions(-DNOMINMAX)
+    add_definitions(-D_CRT_SECURE_NO_WARNINGS)
+endif()
 
 # Set build type
 if(NOT CMAKE_BUILD_TYPE)

@@ -1,30 +1,28 @@
 #include "systemmonitor.h"
-#include "logger.h"
 #include <thread>
 #include <chrono>
 #include <fstream>
 #include <sstream>
 #include <iostream>
 #include <algorithm>
-#include <dirent.h>
+#include <cstring>
+#include <mutex>
+#include <shared_mutex>
 
 #ifdef _WIN32
+#include <winsock2.h>
 #include <windows.h>
-#include <psapi.h>
-#include <pdh.h>
 #include <tlhelp32.h>
+#include <ws2tcpip.h>
+#include <psapi.h>
 #else
-#include <fstream>
-#include <sstream>
 #include <unistd.h>
-#include <sys/sysinfo.h>
-#include <sys/types.h>
+#include <sys/wait.h>
 #include <signal.h>
-#include <pwd.h>
+#include <fcntl.h>
 #include <sys/stat.h>
-#include <cstring>
+#include <dirent.h>
 #include <sys/utsname.h>
-#include <sys/conf.h>
 #endif
 
 namespace SysMon {
@@ -32,6 +30,7 @@ namespace SysMon {
 SystemMonitor::SystemMonitor() 
     : running_(false)
     , initialized_(false)
+    , fallbackMode_(false)
     , updateInterval_(1000) {
     
 #ifdef _WIN32
@@ -173,13 +172,120 @@ void SystemMonitor::setUpdateInterval(std::chrono::milliseconds interval) {
 // Platform-specific implementations (simplified)
 SystemInfo SystemMonitor::collectSystemInfoLinux() {
     SystemInfo info;
-    // Simplified implementation
+    
+    // Get CPU usage from /proc/stat
+    std::ifstream statFile("/proc/stat");
+    if (statFile.is_open()) {
+        std::string line;
+        if (std::getline(statFile, line)) {
+            std::istringstream iss(line);
+            std::string cpu;
+            unsigned long long user, nice, system, idle, iowait, irq, softirq;
+            if (iss >> cpu >> user >> nice >> system >> idle >> iowait >> irq >> softirq) {
+                static unsigned long long lastIdle = 0, lastTotal = 0;
+                
+                unsigned long long total = user + nice + system + idle + iowait + irq + softirq;
+                unsigned long long idleDiff = idle - lastIdle;
+                unsigned long long totalDiff = total - lastTotal;
+                
+                if (totalDiff > 0) {
+                    info.cpuUsageTotal = 100.0 * (1.0 - (double)idleDiff / totalDiff);
+                }
+                
+                lastIdle = idle;
+                lastTotal = total;
+            }
+        }
+    }
+    
+    // Get memory info from /proc/meminfo
+    std::ifstream memFile("/proc/meminfo");
+    if (memFile.is_open()) {
+        std::string line;
+        while (std::getline(memFile, line)) {
+            if (line.find("MemTotal:") == 0) {
+                std::istringstream iss(line);
+                std::string label;
+                unsigned long long value;
+                std::string unit;
+                iss >> label >> value >> unit;
+                info.memoryTotal = value * 1024; // Convert KB to bytes
+            } else if (line.find("MemAvailable:") == 0) {
+                std::istringstream iss(line);
+                std::string label;
+                unsigned long long value;
+                std::string unit;
+                iss >> label >> value >> unit;
+                info.memoryFree = value * 1024; // Convert KB to bytes
+            }
+        }
+        info.memoryUsed = info.memoryTotal - info.memoryFree;
+    }
+    
+    // Get CPU cores
+    info.cpuCoresUsage.resize(std::thread::hardware_concurrency(), info.cpuUsageTotal / std::thread::hardware_concurrency());
+    
+    // Get uptime from /proc/uptime
+    std::ifstream uptimeFile("/proc/uptime");
+    if (uptimeFile.is_open()) {
+        double uptimeSeconds;
+        uptimeFile >> uptimeSeconds;
+        info.uptime = std::chrono::seconds(static_cast<long long>(uptimeSeconds));
+    }
+    
     return info;
 }
 
 SystemInfo SystemMonitor::collectSystemInfoWindows() {
     SystemInfo info;
-    // Simplified implementation
+    
+    // Get CPU usage
+    ULARGE_INTEGER idleTime, kernelTime, userTime;
+    if (GetSystemTimes((FILETIME*)&idleTime, (FILETIME*)&kernelTime, (FILETIME*)&userTime)) {
+        static ULARGE_INTEGER lastIdle, lastKernel, lastUser;
+        
+        ULARGE_INTEGER idleDiff, kernelDiff, userDiff;
+        idleDiff.QuadPart = idleTime.QuadPart - lastIdle.QuadPart;
+        kernelDiff.QuadPart = kernelTime.QuadPart - lastKernel.QuadPart;
+        userDiff.QuadPart = userTime.QuadPart - lastUser.QuadPart;
+        
+        ULARGE_INTEGER totalDiff;
+        totalDiff.QuadPart = kernelDiff.QuadPart + userDiff.QuadPart;
+        
+        if (totalDiff.QuadPart > 0) {
+            double cpuUsage = 100.0 * (1.0 - (double)idleDiff.QuadPart / totalDiff.QuadPart);
+            info.cpuUsageTotal = std::max(0.0, std::min(100.0, cpuUsage));
+        }
+        
+        lastIdle = idleTime;
+        lastKernel = kernelTime;
+        lastUser = userTime;
+    }
+    
+    // Get memory info
+    MEMORYSTATUSEX memInfo;
+    memInfo.dwLength = sizeof(MEMORYSTATUSEX);
+    if (GlobalMemoryStatusEx(&memInfo)) {
+        info.memoryTotal = memInfo.ullTotalPhys;
+        info.memoryUsed = memInfo.ullTotalPhys - memInfo.ullAvailPhys;
+        info.memoryFree = memInfo.ullAvailPhys;
+    }
+    
+    // Get CPU cores
+    SYSTEM_INFO sysInfo;
+    GetSystemInfo(&sysInfo);
+    info.cpuCoresUsage.resize(sysInfo.dwNumberOfProcessors, info.cpuUsageTotal / sysInfo.dwNumberOfProcessors);
+    
+    // Get process count
+    DWORD processes = 0;
+    DWORD processesReturned = 0;
+    if (EnumProcesses(&processes, sizeof(processes), &processesReturned)) {
+        info.processCount = processesReturned / sizeof(DWORD);
+    }
+    
+    // Get uptime
+    info.uptime = std::chrono::seconds(GetTickCount64() / 1000);
+    
     return info;
 }
 
@@ -226,7 +332,35 @@ std::chrono::seconds SystemMonitor::getSystemUptime() {
 
 ProcessInfo SystemMonitor::getProcessInfoLinux(pid_t pid) {
     (void)pid;
-    return ProcessInfo{};
+    return ProcessInfo();
+}
+
+// Fallback mode support
+void SystemMonitor::enableFallbackMode() {
+    fallbackMode_ = true;
+    initialized_ = true;
+    
+    // Create fallback system info
+    SystemInfo fallbackInfo;
+    fallbackInfo.cpuUsageTotal = 0.0;
+    fallbackInfo.cpuCoresUsage = {0.0};
+    fallbackInfo.memoryTotal = 1024 * 1024 * 1024; // 1GB
+    fallbackInfo.memoryUsed = 512 * 1024 * 1024; // 512MB
+    fallbackInfo.memoryFree = 512 * 1024 * 1024;
+    fallbackInfo.memoryCache = 0;
+    fallbackInfo.memoryBuffers = 0;
+    fallbackInfo.processCount = 0;
+    fallbackInfo.threadCount = 0;
+    fallbackInfo.contextSwitches = 0;
+    fallbackInfo.uptime = std::chrono::seconds(0);
+    
+    std::lock_guard<std::shared_mutex> lock(dataMutex_);
+    currentSystemInfo_ = fallbackInfo;
+    currentProcessList_.clear();
+}
+
+bool SystemMonitor::isFallbackMode() const {
+    return fallbackMode_;
 }
 
 } // namespace SysMon
