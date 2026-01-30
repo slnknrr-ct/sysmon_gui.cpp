@@ -46,6 +46,10 @@ constexpr std::chrono::seconds RATE_LIMIT_WINDOW{60}; // 1 minute
 constexpr int MAX_LOGIN_ATTEMPTS = 3;
 constexpr std::chrono::seconds LOCKOUT_DURATION{300}; // 5 minutes
 
+// Heartbeat constants
+constexpr std::chrono::seconds HEARTBEAT_INTERVAL{60}; // 1 minute (less than CLIENT_TIMEOUT)
+constexpr std::chrono::seconds HEARTBEAT_TIMEOUT{10}; // 10 seconds
+
 // Automation constants
 constexpr size_t MAX_AUTOMATION_RULES = 100;
 constexpr int DEFAULT_CONDITION_DURATION = 5;

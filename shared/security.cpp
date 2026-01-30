@@ -117,7 +117,7 @@ bool SecurityManager::isRateLimited(const std::string& clientId) {
     
     auto it = authenticatedClients_.find(clientId);
     if (it == authenticatedClients_.end()) {
-        return true; // Deny unknown clients
+        return false; // Allow unknown clients to authenticate
     }
     
     return !it->second->rateLimiter.isAllowed();

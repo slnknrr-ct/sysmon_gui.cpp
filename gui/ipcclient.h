@@ -69,6 +69,8 @@ private slots:
     void onSocketError(QAbstractSocket::SocketError error);
     void onSocketReadyRead();
     void onConnectionTimer();
+    void onAuthenticationTimeout();
+    void onHeartbeatTimer();
     
     // Connection management
     void startReconnection();
@@ -144,7 +146,7 @@ private:
     static constexpr int MAX_RECONNECT_ATTEMPTS = 10;
     static constexpr int COMMAND_TIMEOUT = 10000; // 10 seconds
     static constexpr int RECONNECT_DELAY = 2000; // 2 seconds
-    static constexpr int HEARTBEAT_INTERVAL = 30000; // 30 seconds
+    static constexpr int HEARTBEAT_INTERVAL = 60000; // 60 seconds (from Constants::HEARTBEAT_INTERVAL)
     static constexpr int AUTH_TIMEOUT = 10000; // 10 seconds
 };
 

@@ -16,7 +16,9 @@ IpcClient::IpcClient(QObject* parent)
     , reconnecting_(false)
     , reconnectAttempts_(0)
     , connected_(false)
-    , commandCounter_(0) {
+    , commandCounter_(0)
+    , authTimer_(nullptr)
+    , heartbeatTimer_(nullptr) {
     
     socket_ = std::make_unique<QTcpSocket>(this);
     
@@ -34,6 +36,11 @@ IpcClient::IpcClient(QObject* parent)
     connectionTimer_ = new QTimer(this);
     connect(connectionTimer_, &QTimer::timeout,
             this, &IpcClient::onConnectionTimer);
+    
+    // Set up heartbeat timer
+    heartbeatTimer_ = new QTimer(this);
+    connect(heartbeatTimer_, &QTimer::timeout,
+            this, &IpcClient::onHeartbeatTimer);
 }
 
 IpcClient::~IpcClient() {
@@ -41,9 +48,10 @@ IpcClient::~IpcClient() {
 }
 
 bool IpcClient::connectToAgent(const std::string& host, int port) {
-    if (connected_) {
-        qDebug() << "Connection successful!";
-        return true;
+    if (socket_->state() != QAbstractSocket::UnconnectedState) {
+        qDebug() << "Socket already connecting or connected, disconnecting first...";
+        socket_->disconnectFromHost();
+        socket_->waitForDisconnected(1000);
     }
     
     host_ = host;
@@ -86,11 +94,27 @@ bool IpcClient::connectToAgent(const std::string& host, int port) {
         return false;
     }
     
-    qDebug() << "Connection successful!";
+    qDebug() << "Socket connection established, waiting for authentication...";
     return true;
 }
 
 void IpcClient::disconnectFromAgent() {
+    // Stop all timers
+    if (connectionTimer_) {
+        connectionTimer_->stop();
+    }
+    if (authTimer_) {
+        authTimer_->stop();
+        authTimer_->deleteLater();
+        authTimer_ = nullptr;
+    }
+    if (heartbeatTimer_) {
+        heartbeatTimer_->stop();
+    }
+    
+    reconnecting_ = false;
+    reconnectAttempts_ = 0;
+    
     if (socket_ && socket_->state() != QAbstractSocket::UnconnectedState) {
         socket_->disconnectFromHost();
         if (!socket_->waitForDisconnected(1000)) {
@@ -99,12 +123,6 @@ void IpcClient::disconnectFromAgent() {
     }
     
     connected_ = false;
-    reconnecting_ = false;
-    reconnectAttempts_ = 0;
-    
-    if (connectionTimer_) {
-        connectionTimer_->stop();
-    }
 }
 
 bool IpcClient::isConnected() const {
@@ -185,8 +203,19 @@ void IpcClient::onSocketConnected() {
 }
 
 void IpcClient::onSocketDisconnected() {
+    bool wasConnected = connected_;
     connected_ = false;
-    lastError_ = "Connection lost";
+    
+    qDebug() << "=== SOCKET DISCONNECTED ===";
+    qDebug() << "Was connected:" << wasConnected;
+    qDebug() << "Socket error:" << (socket_ ? socket_->errorString() : "No socket");
+    qDebug() << "Socket state:" << (socket_ ? socket_->state() : -1);
+    
+    // Stop heartbeat timer
+    if (heartbeatTimer_) {
+        heartbeatTimer_->stop();
+        qDebug() << "Heartbeat timer stopped";
+    }
     
     emit disconnected();
     
@@ -194,10 +223,18 @@ void IpcClient::onSocketDisconnected() {
         connectionHandler_(false);
     }
     
-    // Start reconnection if not manually disconnected and not already reconnecting
-    if (!reconnecting_) {
+    // Only start reconnection if:
+    // 1. We were previously fully connected (not just during authentication)
+    // 2. We're not manually disconnecting
+    // 3. We're not already reconnecting
+    if (wasConnected && !reconnecting_) {
+        qDebug() << "Connection lost, starting reconnection...";
         startReconnection();
+    } else {
+        qDebug() << "Socket disconnected during authentication or manual disconnect, not reconnecting";
     }
+    
+    qDebug() << "=== SOCKET DISCONNECTED HANDLED ===";
 }
 
 void IpcClient::onSocketError(QAbstractSocket::SocketError error) {
@@ -244,6 +281,45 @@ void IpcClient::onConnectionTimer() {
         connectionTimer_->stop();
         emit errorOccurred("Maximum reconnection attempts reached");
     }
+}
+
+void IpcClient::onAuthenticationTimeout() {
+    qDebug() << "=== AUTHENTICATION TIMEOUT ===";
+    
+    connected_ = false;
+    lastError_ = "Authentication timeout";
+    
+    emit errorOccurred("Authentication timeout - no response from agent");
+    
+    // Close the socket
+    if (socket_) {
+        socket_->disconnectFromHost();
+    }
+    
+    // Clean up auth timer
+    if (authTimer_) {
+        authTimer_->deleteLater();
+        authTimer_ = nullptr;
+    }
+    
+    qDebug() << "=== AUTHENTICATION TIMEOUT HANDLED ===";
+}
+
+void IpcClient::onHeartbeatTimer() {
+    if (!connected_ || !socket_) {
+        qDebug() << "Heartbeat: Not connected, stopping timer";
+        heartbeatTimer_->stop();
+        return;
+    }
+    
+    // Send heartbeat ping
+    Command heartbeatCmd;
+    heartbeatCmd.type = CommandType::PING;
+    heartbeatCmd.id = generateCommandId();
+    heartbeatCmd.parameters["heartbeat"] = "true";
+    
+    qDebug() << "Sending heartbeat to agent";
+    sendCommandToSocket(heartbeatCmd);
 }
 
 void IpcClient::processReceivedData(const std::string& data) {
@@ -293,7 +369,14 @@ void IpcClient::processMessage(const IpcMessage& message) {
 }
 
 void IpcClient::sendCommandToSocket(const Command& command) {
-    if (!connected_ || !socket_) {
+    if (!socket_) {
+        return;
+    }
+    
+    // For authentication (PING with auth_token), we allow sending even if not fully connected yet
+    // For other commands, we require full connection
+    if (!connected_ && !(command.type == CommandType::PING && command.parameters.find("auth_token") != command.parameters.end())) {
+        qDebug() << "Command blocked - not connected and not authentication request";
         return;
     }
     
@@ -305,6 +388,8 @@ void IpcClient::sendCommandToSocket(const Command& command) {
     
     // Send message
     socket_->write(jsonStr.c_str(), jsonStr.length());
+    
+    qDebug() << "Command sent to socket:" << QString::fromStdString(jsonStr);
 }
 
 void IpcClient::handlePendingCommands() {
@@ -372,45 +457,88 @@ std::string IpcClient::generateCommandId() {
 }
 
 void IpcClient::sendAuthenticationRequest() {
-    qDebug() << "Sending authentication request...";
+    qDebug() << "=== SENDING AUTHENTICATION REQUEST ===";
+    qDebug() << "Socket state:" << socket_->state();
+    qDebug() << "Connected status:" << connected_;
+    
+    // Set up authentication timeout
+    authTimer_ = new QTimer(this);
+    authTimer_->setSingleShot(true);
+    connect(authTimer_, &QTimer::timeout, this, &IpcClient::onAuthenticationTimeout);
+    authTimer_->start(AUTH_TIMEOUT);
     
     Command authCommand;
     authCommand.type = CommandType::PING;
     authCommand.id = generateCommandId();
     authCommand.parameters["auth_token"] = "gui_client_token"; // Simple token for now
     
+    qDebug() << "Auth command ID:" << QString::fromStdString(authCommand.id);
+    qDebug() << "Auth command token:" << QString::fromStdString(authCommand.parameters["auth_token"]);
+    
     sendCommandToSocket(authCommand);
-    qDebug() << "Authentication request sent";
+    qDebug() << "=== AUTHENTICATION REQUEST SENT ===";
 }
 
 void IpcClient::handleAuthenticationResponse(const Response& response) {
-    qDebug() << "Received authentication response:" << QString::fromStdString(response.message);
+    qDebug() << "=== RECEIVED AUTHENTICATION RESPONSE ===";
+    qDebug() << "Response ID:" << QString::fromStdString(response.commandId);
+    qDebug() << "Response status:" << static_cast<int>(response.status);
+    qDebug() << "Response message:" << QString::fromStdString(response.message);
+    qDebug() << "Current connected status:" << connected_;
+    qDebug() << "Socket state:" << (socket_ ? socket_->state() : -1);
+    
+    // Stop authentication timeout
+    if (authTimer_) {
+        authTimer_->stop();
+        authTimer_->deleteLater();
+        authTimer_ = nullptr;
+    }
     
     if (response.status == CommandStatus::SUCCESS) {
         // Authentication successful
-        qDebug() << "Authentication successful!";
+        qDebug() << "✓ Authentication successful!";
         connected_ = true;
+        
+        // Start heartbeat timer
+        if (heartbeatTimer_) {
+            heartbeatTimer_->start(HEARTBEAT_INTERVAL);
+            qDebug() << "Heartbeat timer started with interval:" << HEARTBEAT_INTERVAL << "ms";
+        } else {
+            qDebug() << "ERROR: heartbeatTimer_ is null!";
+        }
         
         // Now send pending commands
         handlePendingCommands();
         
+        qDebug() << "Emitting connected() signal";
         emit connected();
         
         if (connectionHandler_) {
+            qDebug() << "Calling connection handler";
             connectionHandler_(true);
+        } else {
+            qDebug() << "No connection handler set";
         }
+        
+        qDebug() << "=== AUTHENTICATION SUCCESSFUL ===";
     } else {
         // Authentication failed
-        qDebug() << "Authentication failed:" << QString::fromStdString(response.message);
+        qDebug() << "✗ Authentication failed:" << QString::fromStdString(response.message);
         connected_ = false;
         lastError_ = response.message;
         
         emit errorOccurred("Authentication failed: " + response.message);
         
-        // Disconnect
-        if (socket_) {
-            socket_->disconnectFromHost();
-        }
+        // Don't immediately reconnect on authentication failure
+        // Let the user manually reconnect or wait for auto-reconnect with delay
+        QTimer::singleShot(5000, this, [this]() {
+            if (!connected_ && socket_->state() == QAbstractSocket::UnconnectedState) {
+                qDebug() << "Attempting reconnection after authentication failure...";
+                startReconnection();
+            }
+        });
+        
+        qDebug() << "=== AUTHENTICATION FAILED ===";
     }
 }
 

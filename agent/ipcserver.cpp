@@ -474,7 +474,11 @@ bool IpcServer::isRateLimited(const std::string& clientId) {
 }
 
 void IpcServer::handleAuthentication(const std::string& clientId, const std::string& message) {
-    std::cout << "Handling authentication for client " << clientId << std::endl;
+    std::cout << "=== HANDLING AUTHENTICATION FOR CLIENT " << clientId << " ===" << std::endl;
+    
+    if (logger_) {
+        logger_->info("=== HANDLING AUTHENTICATION FOR CLIENT " + clientId + " ===");
+    }
     
     try {
         // Try to parse as authentication request
@@ -483,10 +487,17 @@ void IpcServer::handleAuthentication(const std::string& clientId, const std::str
         if (messageType == IpcProtocol::MessageType::COMMAND) {
             Command command = IpcProtocol::deserializeCommand(message);
             
+            std::cout << "Command type: " << static_cast<int>(command.type) << std::endl;
+            std::cout << "Command ID: " << command.id << std::endl;
+            
             // Check if this is an authentication command
             if (command.type == CommandType::PING && command.parameters.find("auth_token") != command.parameters.end()) {
                 std::string token = command.parameters.at("auth_token");
                 std::cout << "Received authentication token: " << token << " from client " << clientId << std::endl;
+                
+                if (logger_) {
+                    logger_->info("Auth token received from client " + clientId + ": " + token.substr(0, 8) + "...");
+                }
                 
                 std::lock_guard<std::mutex> lock(clientsMutex_);
                 auto it = clients_.find(clientId);
